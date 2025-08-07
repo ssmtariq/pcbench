@@ -238,17 +238,23 @@ psql -c "CREATE DATABASE benchbase;"
 # Symlink for BenchBase config
 ln -s benchbase/target/benchbase-postgres/config ~/config
 
-# Run small test
-java -jar benchbase/target/benchbase-postgres/benchbase.jar \
-     -b tpcc \
-     -c benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_small.xml \
-     --create=true --load=true --execute=true
+# Create and load small test
+/usr/bin/java  -jar benchbase/target/benchbase-postgres/benchbase.jar \
+               -b tpcc \
+               -c benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_small.xml \
+               --create=true --load=true --execute=false
+
+# Execute small test
+/usr/bin/java  -jar benchbase/target/benchbase-postgres/benchbase.jar \
+               -b tpcc \
+               -c benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_small.xml \
+               --create=false --load=false --execute=true
 
 # Run large test
-java -jar benchbase/target/benchbase-postgres/benchbase.jar \
-     -b tpcc \
-     -c benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_large.xml \
-     --create=true --load=false --execute=true
+/usr/bin/java  -jar benchbase/target/benchbase-postgres/benchbase.jar \
+               -b tpcc \
+               -c benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_large.xml \
+               --create=false --load=false --execute=true
 ```
 
 ---
@@ -285,11 +291,11 @@ hpcrun -o $HPCRUN_OUT             \
 ### Drive the workload *while hpcrun is active*
 
 ```bash
-# 1-minute sanity run
+# Run small workload
 /usr/bin/java  -jar benchbase/target/benchbase-postgres/benchbase.jar \
                -b tpcc \
                -c benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_small.xml \
-               --create=true --load=true --execute=true
+               --create=false --load=false --execute=true
 ```
 
 ### Stop the server when done:
@@ -311,8 +317,6 @@ hpcstruct -j 8 $HPCRUN_OUT
 hpcprof  -j 8  \
          -S $HOME/postgres.hpcstruct \
          -o $HOME/hpctoolkit-pg-database $HPCRUN_OUT
-
-sudo apt install -y zip unzip
 ```
 
 ---
@@ -322,10 +326,11 @@ sudo apt install -y zip unzip
 ### Ship the hpctoolkit database to your local machine and use hpcviewer for inspection
 
    ```bash
+    sudo apt install -y zip unzip
     # zip the database for shipping
-    zip -r hpctoolkit-pg-database.zip hpctoolkit-pg-database-benchbase
+    zip -r hpctoolkit-pg-database-benchbase.zip hpctoolkit-pg-database
     # Copy the db from cloudlab to your local machine
-    scp -r -p 22 USERNAME@NODE.CLUSTER.cloudlab.us:/users/USERNAME/hpctoolkit-pg-database.zip .
+    scp -r -p 22 USERNAME@NODE.CLUSTER.cloudlab.us:/users/USERNAME/hpctoolkit-pg-database-benchbase.zip .
    ```
 ---
 
