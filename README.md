@@ -135,13 +135,18 @@ python pcbench/best_pg_cfg.py
 sudo apt update && sudo apt -y install jq
 cp ~/pgdata/postgresql.conf ~/pgdata/postgresql.conf.bak
 
-jq -r 'to_entries[] | .key as $k | .value as $v | ($v|type) as $t |
-  if $t == "string" and ($v|test("^(on|off|true|false)$"))
+jq -r '
+  to_entries[] |
+  .key as $k |
+  .value as $v |
+  ($v|type) as $t |
+  if   $t == "string" and ($v|test("^(on|off|true|false)$"))
   then "\($k) = \($v)"
   elif $t == "string"
-  then "\($k) = '\($v)'"
+  then "\($k) = '\''\($v)'\''"
   else "\($k) = \($v)"
-  end' ~/pcbench/TUNA_best_pgsql_config.json >> ~/pgdata/postgresql.conf
+  end
+'  ~/pcbench/TUNA_best_pgsql_config.json >> ~/pgdata/postgresql.conf
 
 chmod 600 ~/pgdata/postgresql.conf
 postgres -D ~/pgdata -C max_connections > /dev/null \
