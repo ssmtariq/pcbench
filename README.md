@@ -121,8 +121,15 @@ pg_ctl -D ~/pgdata stop;
 
 ---
 
-## 5. Copy Selected Postgres Configuration
+## 5. Find Best Postgres Configuration and Set it Up
 
+### Find the best pgsql configuration from TUNA samples
+```bash
+pip install pandas
+python pcbench/best_pg_cfg.py
+```
+
+### Setup pgsql to use the selected configuration
 ```bash
 # Install jq and parse selected config
 sudo apt update && sudo apt -y install jq
@@ -134,7 +141,7 @@ jq -r 'to_entries[] | .key as $k | .value as $v | ($v|type) as $t |
   elif $t == "string"
   then "\($k) = '\($v)'"
   else "\($k) = \($v)"
-  end' ~/TUNA_best_pgsql_config.json >> ~/pgdata/postgresql.conf
+  end' ~/pcbench/TUNA_best_pgsql_config.json >> ~/pgdata/postgresql.conf
 
 chmod 600 ~/pgdata/postgresql.conf
 postgres -D ~/pgdata -C max_connections > /dev/null \
