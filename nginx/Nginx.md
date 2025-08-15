@@ -25,17 +25,18 @@ wget http://nginx.org/download/nginx-1.27.0.tar.gz
 tar xf nginx-1.27.0.tar.gz && cd nginx-1.27.0
 
 # Configure with debug support and frame pointers
+export CFLAGS="-g -O2 -fno-omit-frame-pointer"
 ./configure \
     --prefix=$HOME/nginx \
     --with-http_ssl_module \
     --with-threads \
     --with-file-aio \
-    --with-debug \
-    CFLAGS="-g -O2 -fno-omit-frame-pointer"
+    --with-debug
 
 # Build and install
-make -j$(nproc)
+make -j8
 make install
+cd ~
 
 # Add nginx to your PATH
 echo 'export PATH=$HOME/nginx/sbin:$PATH' >> ~/.bashrc
@@ -47,17 +48,7 @@ At this point `nginx -V` should report version 1.27.0 with the
 
 ## 2. Clone TUNA and pick the best nginx configuration
 
-Clone the TUNA repository and its submodules. You can use either
-`uw-mad-dash/TUNA` or `ssmtariq/TUNA`. For consistency with the postgres
-example we recommend the upstream repo:
-```bash
-git clone https://github.com/uw-mad-dash/TUNA.git
-cd TUNA
-git submodule update --init --recursive
-cd ..
-```
-This repository contains sample tuning runs for a variety of systems. To
-automatically select the best nginx configuration from the **Azure
+To automatically select the best nginx configuration from the TUNA **Azure
 wikipedia** workload, run the provided Python script:
 ```bash
 pip install pandas
@@ -71,10 +62,10 @@ the highest **Performance** metric. It writes the selected knob values
 to `TUNA_best_nginx_config.json` and prints the corresponding worker
 count, performance and source file.
 
-## 3. Convert JSON into an nginx configuration
+## 3. Convert JSON config file into an nginx configuration
 
-The JSON file contains key--value pairs for nginx's tunable knobs.
-Create a new configuration file (e.g. `~/nginx/conf/nginx_best.conf`)
+The JSON file `TUNA_best_nginx_config.json` contains key--value pairs for nginx's tunable knobs.
+We need to create a new configuration file (e.g. `~/nginx/conf/nginx_best.conf`)
 starting from the default `nginx.conf`. Inside the `http` block add one
 directive per key from the JSON. For example, a JSON entry
 ```bash
@@ -95,8 +86,15 @@ http {
 }
 ```
 Make sure to place the directives in the appropriate context (`http` or
-`server`) and comment out any conflicting defaults. Test the syntax with
-`nginx -t -c ~/nginx/conf/nginx_best.conf`.
+`server`) and comment out any conflicting defaults. 
+Run the script to do it automatically:
+```bash
+sh $HOME/pcbench/nginx/configbuilder.sh
+```
+Then test the syntax:
+```bash
+nginx -t -c ~/nginx/conf/nginx_best.conf
+```
 
 ## 4. Benchmark the selected configuration
 
@@ -105,9 +103,9 @@ commands build wrk from source:
 ```bash
 git clone https://github.com/wg/wrk.git ~/wrk
 cd ~/wrk
-make -j$(nproc)
+make -j8
 ```
-Use the provided `nginx_bench.sh` script to evaluate throughput. By
+Use the `nginx_bench.sh` script to evaluate throughput. By
 default it runs 10 iterations of 30 seconds each with 4 threads and 64
 concurrent connections. It starts nginx with your config, drives traffic
 using wrk, parses the `Requests/sec` value and finally computes
@@ -117,60 +115,72 @@ export NGINX_BIN=$HOME/nginx/sbin/nginx
 export NGINX_CONF=$HOME/nginx/conf/nginx_best.conf
 export WRK_BIN=$HOME/wrk/wrk
 export ITERATIONS=5     # optional: number of runs
-export DURATION=20      # optional: duration in seconds
+export DURATION=10      # optional: duration in seconds
 
-./nginx_bench.sh
+bash $HOME/pcbench/nginx/nginx_bench.sh
 ```
 The script logs per‑run results in a temporary directory and appends a
 summary entry to `$HOME/nginx_bench_results.log` for easy tracking.
 
 ## 5. Profile nginx with HPCToolkit
 
-With the best configuration applied, collect cache‑miss profiles to
+### 5A With the best configuration applied, collect cache‑miss profiles to
 identify hot spots. HPCToolkit uses PAPI events (L2 and L3 cache misses)
 to sample call stacks.
 
-1.  **Stop** any running nginx instance: `nginx -s stop`.
-2.  **Set output directories**. Choose a persistent directory for
-    measurements so that large profile files do not fill `/tmp`.
-
 ```bash
+# 1. Stop any running nginx instance
+nginx -s stop
+# 2. Set HPCToolkit output directory (where measurements will be stored)
 export HPCRUN_OUT=$HOME/hpctoolkit-nginx-measurements
 export HPCRUN_TMPDIR=$HPCRUN_OUT
 rm -rf "$HPCRUN_OUT" && mkdir -p "$HPCRUN_OUT"
 ```
-3.  **Launch nginx under** `hpcrun`. Use two events: `PAPI_L2_TCM` and
-    `PAPI_L3_TCM` with a sampling period of 100 k misses each. The `--`
+### 5B **Launch nginx wrapped under** `hpctoolkit`. Use two events: `PAPI_L2_TCM` and
+    `PAPI_L3_TCM` with a sampling period of 1000 misses each. The `--`
     separates hpcrun options from the command being profiled.
 
 ```bash
-hpcrun -o "$HPCRUN_OUT" \
-        -e PAPI_L2_TCM@100000 \
-        -e PAPI_L3_TCM@100000 \
+# 3. Wrap nginx startup in hpcrun to collect cache-miss events
+hpcrun  -o "$HPCRUN_OUT" \
+        -e PAPI_L2_TCM@1000 \
+        -e PAPI_L3_TCM@1000 \
         -- $NGINX_BIN -c $NGINX_CONF -p $(dirname $NGINX_CONF)
 ```
-4.  **Drive the workload** while hpcrun is recording. In another
-    terminal run `./nginx_bench.sh` with a small number of iterations
-    (e.g. 1 or 2) to generate traffic.
+### 5C **Drive the workload** while hpcrun is recording. 
+```bash
+# 4. In another terminal run nginx with a small number of iterations (e.g. 10 duration 30-60s) to generate traffic.
+bash $HOME/pcbench/nginx/nginx_bench.sh
+# 5. Stop nginx after the workload completes
+nginx -s stop
+```
 
-5.  **Stop nginx** after the workload completes: `nginx -s stop`.
-
-6.  **Create the performance database**. HPCToolkit needs both
+### 5D **Create the performance database**. HPCToolkit needs both
     structural information (DWARF and control‑flow graphs) and
     measurement data. Generate these as follows:
 
 ```bash
-    hpcstruct -j$(nproc) $NGINX_BIN
-    hpcstruct -j$(nproc) "$HPCRUN_OUT"
-    hpcprof  -j$(nproc) \
+# 6. Structural analysis (DWARF + CFG)
+    hpcstruct -j8 $NGINX_BIN
+    hpcstruct -j8 "$HPCRUN_OUT"
+# 7. Correlate measurements with source & binaries
+    hpcprof  -j8 \
              -S $HOME/nginx.hpcstruct \
              -o $HOME/hpctoolkit-nginx-database "$HPCRUN_OUT"
 ```
-7.  **Inspect with hpcviewer**. Transfer the `hpctoolkit-nginx-database`
+### 5E **Inspect with hpcviewer**. Transfer the `hpctoolkit-nginx-database`
     directory to your workstation and open it in the HPC Viewer GUI.
     Sort the call‑path table by `PAPI_L3_TCM` to find the worst cache
     offenders. Export tables or flame graphs as PNG images and feed them
     into ChatGPT for qualitative analysis.
+
+   ```bash
+    sudo apt install -y zip unzip
+    # zip the database for shipping
+    zip -r hpctoolkit-nginx-database.zip hpctoolkit-nginx-database
+    # Copy the db from cloudlab to your local machine
+    scp -r -p 22 USERNAME@NODE.CLUSTER.cloudlab.us:/users/USERNAME/hpctoolkit-nginx-database.zip .
+   ```
 
 ## 6. Refine the configuration using ChatGPT's feedback
 
@@ -187,7 +197,7 @@ to a new configuration file (e.g. `nginx_optimized.conf`).
 Repeat the benchmarking step with your optimized configuration:
 ```bash
 export NGINX_CONF=$HOME/nginx/conf/nginx_optimized.conf
-./nginx_bench.sh
+bash $HOME/pcbench/nginx/nginx_bench.sh
 ```
 Compare the mean and median throughputs against those of the original
 configuration. If performance improves and cache misses decrease, commit
