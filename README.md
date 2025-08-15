@@ -53,6 +53,8 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
 | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker $USER
+newgrp docker
 
 # fio, stress-ng, linux-tools
 sudo apt install -y fio stress-ng linux-tools-common linux-tools-$(uname -r)
@@ -66,6 +68,7 @@ bash miniconda.sh -b -p ${CONDA_DIR}
 echo "export PATH=${CONDA_DIR}/bin:\$PATH" >> ~/.bashrc
 source ${CONDA_DIR}/etc/profile.d/conda.sh
 conda init bash
+cd ~
 ```
 
 ---
