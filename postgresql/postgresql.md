@@ -9,95 +9,7 @@ This guide provides a complete, end-to-end walkthrough for running PC Bench on a
 3. Collect **cache-miss call-path profiles** using **HPCToolkit + PAPI (via Spack)**
 4. Use results to inform new **GUC knob** designs
 
----
-
-## 1. Reserve and Prepare the Node
-
-```bash
-# In the CloudLab UI:
-#  • Choose Ubuntu 22.04 (UBUNTU22-64-STD)
-#  • Reserve at least one xl170 node
-#  • Enable "sudo" for your user
-```
-
-### Enable Performance Counters (Per Boot)
-
-```bash
-sudo sysctl -w kernel.perf_event_paranoid=-1
-sudo sh -c 'echo -1 > /proc/sys/kernel/perf_event_paranoid'
-```
-
-Without this, Linux restricts access to raw cache-miss events.
-
----
-
-## 2. Install Dependencies for TUNA
-
-```bash
-# Python 3.11 + pip
-sudo add-apt-repository ppa:deadsnakes/ppa -y
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3.11 python3.11-venv python3.11-distutils python3-pip
-
-# Java 21
-sudo apt install -y openjdk-21-jdk
-
-# Docker CE (latest)
-sudo apt remove -y docker docker-engine docker.io containerd runc
-sudo apt install -y ca-certificates curl gnupg lsb-release
-sudo mkdir -m 0755 -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
-  sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-| sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo usermod -aG docker $USER
-newgrp docker
-
-# fio, stress-ng, linux-tools
-sudo apt install -y fio stress-ng linux-tools-common linux-tools-$(uname -r)
-
-# Miniconda (installed to /mydata/miniconda3)
-CONDA_DIR=/mydata/miniconda3
-sudo chown -R $USER /mydata
-cd /mydata
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-bash miniconda.sh -b -p ${CONDA_DIR}
-echo "export PATH=${CONDA_DIR}/bin:\$PATH" >> ~/.bashrc
-source ${CONDA_DIR}/etc/profile.d/conda.sh
-conda init bash
-cd ~
-```
-
----
-
-## 3. Install HPCToolkit via Spack
-
-```bash
-sudo apt update && sudo apt -y install git build-essential cmake gfortran \
-     libssl-dev libreadline-dev zlib1g-dev openjdk-21-jdk
-
-git clone https://github.com/spack/spack.git ~/spack
-. ~/spack/share/spack/setup-env.sh
-echo ". ~/spack/share/spack/setup-env.sh" >> ~/.bashrc
-spack external find gcc gfortran cmake
-spack external find papi
-spack compiler find
-spack mirror add binary_mirror https://binaries.spack.io/releases/v0.20
-spack buildcache keys --install --trust
-
-# Install HPCToolkit + PAPI (with workarounds if needed)
-spack install -j8 hpctoolkit +papi
-spack install -j8 hpctoolkit +papi ~xed
-spack install -j8 hpctoolkit +papi ^intel-xed@2023.10.11
-spack load hpctoolkit
-```
-
----
-
-## 4. Build PostgreSQL 16.1 (with debug symbols)
+## 1. Build PostgreSQL 16.1 (with debug symbols)
 
 ```bash
 wget https://ftp.postgresql.org/pub/source/v16.1/postgresql-16.1.tar.gz
@@ -124,7 +36,7 @@ pg_ctl -D ~/pgdata stop;
 
 ---
 
-## 5. Find Best Postgres Configuration and Set it Up
+## 2. Find Best Postgres Configuration and Set it Up
 
 ### Find the best pgsql configuration from TUNA samples
 ```bash
@@ -160,7 +72,7 @@ pg_ctl -D ~/pgdata restart
 
 ---
 
-## 6. Install JDK 23 for BenchBase
+## 3. Install JDK 23 for BenchBase
 
 ```bash
 sudo apt-get update
@@ -182,7 +94,7 @@ javac --version
 
 ---
 
-## 7. Clone and Build BenchBase
+## 4. Clone and Build BenchBase
 
 ```bash
 git clone --depth 1 https://github.com/cmu-db/benchbase.git
@@ -195,7 +107,7 @@ cd benchbase-postgres
 
 ---
 
-## 8. Generate and Run TPCC Workloads for xl170
+## 5. Generate and Run TPCC Workloads for xl170
 
 ```bash
 sudo apt-get update -y
@@ -262,7 +174,7 @@ ln -s benchbase/target/benchbase-postgres/config ~/config
 
 ---
 
-## 9. Collect cache‑miss profiles with HPCToolkit
+## 6. Collect cache‑miss profiles with HPCToolkit
 
 ### Wrap the *server* in `hpcrun`
 
@@ -309,7 +221,7 @@ pg_ctl -D ~/pgdata stop;
 
 ---
 
-## 10. Build the performance database
+## 7. Build the performance database
 
 ```bash
 # 1. Structural analysis (DWARF + CFG)
@@ -324,7 +236,7 @@ hpcprof  -j 8  \
 
 ---
 
-## 11. Inspect results
+## 8. Inspect results
 
 ### Ship the hpctoolkit database to your local machine and use hpcviewer for inspection
 
@@ -337,7 +249,7 @@ hpcprof  -j 8  \
    ```
 ---
 
-## 12.  From hotspots to new GUC knobs (example workflow)
+## 9  From hotspots to new GUC knobs (example workflow)
 
 1. **Identify culprit code.**
    Suppose 40 % of L3 misses sit in `BufferAlloc()` while reading shared buffers.
@@ -369,7 +281,7 @@ hpcprof  -j 8  \
 
 ---
 
-## 13. Why each technology?
+## 10. Why each technology?
 
 | Tool                          | Role                                                                                                                                                         |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
