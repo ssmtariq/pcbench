@@ -161,12 +161,12 @@ nginx -s stop
 
 ```bash
 # 6. Structural analysis (DWARF + CFG)
-    hpcstruct -j8 $NGINX_BIN
-    hpcstruct -j8 "$HPCRUN_OUT"
+hpcstruct -j8 $NGINX_BIN
+hpcstruct -j8 "$HPCRUN_OUT"
 # 7. Correlate measurements with source & binaries
-    hpcprof  -j8 \
-             -S $HOME/nginx.hpcstruct \
-             -o $HOME/hpctoolkit-nginx-database "$HPCRUN_OUT"
+hpcprof  -j8 \
+            -S $HOME/nginx.hpcstruct \
+            -o $HOME/hpctoolkit-nginx-database "$HPCRUN_OUT"
 ```
 ### 5E **Inspect with hpcviewer**. Transfer the `hpctoolkit-nginx-database`
     directory to your workstation and open it in the HPC Viewer GUI.
@@ -174,13 +174,13 @@ nginx -s stop
     offenders. Export tables or flame graphs as PNG images and feed them
     into ChatGPT for qualitative analysis.
 
-   ```bash
-    sudo apt install -y zip unzip
-    # zip the database for shipping
-    zip -r hpctoolkit-nginx-database.zip hpctoolkit-nginx-database
-    # Copy the db from cloudlab to your local machine
-    scp -r -p 22 USERNAME@NODE.CLUSTER.cloudlab.us:/users/USERNAME/hpctoolkit-nginx-database.zip .
-   ```
+```bash
+sudo apt install -y zip unzip
+# zip the database for shipping
+zip -r hpctoolkit-nginx-database.zip hpctoolkit-nginx-database
+# Copy the db from cloudlab to your local machine
+scp -r -p 22 USERNAME@NODE.CLUSTER.cloudlab.us:/users/USERNAME/hpctoolkit-nginx-database.zip .
+```
 
 ## 6. Refine the configuration using ChatGPT's feedback
 
