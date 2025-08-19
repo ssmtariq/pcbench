@@ -41,6 +41,12 @@ cd ~
 # Add nginx to your PATH
 echo 'export PATH=$HOME/nginx/sbin:$PATH' >> ~/.bashrc
 source ~/.bashrc
+
+#Try nginx
+nginx 
+#If port binding fails at 80 then update the nginx.conf file "listen" to unprevileged port e.g. 8080
+code ~/nginx/conf/nginx.conf
+nginx -s stop
 ```
 
 At this point `nginx -V` should report version 1.27.0 with the
@@ -124,8 +130,8 @@ summary entry to `$HOME/nginx_bench_results.log` for easy tracking.
 
 ## 5. Profile nginx with HPCToolkit
 
-### 5A With the best configuration applied, collect cache‑miss profiles to
-identify hot spots. HPCToolkit uses PAPI events (L2 and L3 cache misses)
+### 5A With the best configuration applied, collect cache‑miss profiles to identify hot spots. 
+HPCToolkit uses PAPI events (L2 and L3 cache misses)
 to sample call stacks.
 
 ```bash
@@ -136,9 +142,9 @@ export HPCRUN_OUT=$HOME/hpctoolkit-nginx-measurements
 export HPCRUN_TMPDIR=$HPCRUN_OUT
 rm -rf "$HPCRUN_OUT" && mkdir -p "$HPCRUN_OUT"
 ```
-### 5B **Launch nginx wrapped under** `hpctoolkit`. Use two events: `PAPI_L2_TCM` and
-    `PAPI_L3_TCM` with a sampling period of 1000 misses each. The `--`
-    separates hpcrun options from the command being profiled.
+### 5B **Launch nginx wrapped under** `hpctoolkit`. 
+    Use two events: `PAPI_L2_TCM` and `PAPI_L3_TCM` with a sampling period of 1000 misses each. 
+    The `--` separates hpcrun options from the command being profiled.
 
 ```bash
 # 3. Wrap nginx startup in hpcrun to collect cache-miss events
@@ -155,9 +161,9 @@ bash $HOME/pcbench/nginx/nginx_bench.sh
 nginx -s stop
 ```
 
-### 5D **Create the performance database**. HPCToolkit needs both
-    structural information (DWARF and control‑flow graphs) and
-    measurement data. Generate these as follows:
+### 5D **Create the performance database**. 
+    HPCToolkit needs both structural information (DWARF and control‑flow graphs) 
+    and measurement data. Generate these as follows:
 
 ```bash
 # 6. Structural analysis (DWARF + CFG)
@@ -168,8 +174,9 @@ hpcprof  -j8 \
             -S $HOME/nginx.hpcstruct \
             -o $HOME/hpctoolkit-nginx-database "$HPCRUN_OUT"
 ```
-### 5E **Inspect with hpcviewer**. Transfer the `hpctoolkit-nginx-database`
-    directory to your workstation and open it in the HPC Viewer GUI.
+### 5E **Inspect with hpcviewer**. 
+    Transfer the `hpctoolkit-nginx-database` directory to your workstation 
+    and open it in the HPC Viewer GUI.
     Sort the call‑path table by `PAPI_L3_TCM` to find the worst cache
     offenders. Export tables or flame graphs as PNG images and feed them
     into ChatGPT for qualitative analysis.
