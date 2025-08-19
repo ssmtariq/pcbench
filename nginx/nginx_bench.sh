@@ -82,16 +82,24 @@ log "Starting $ITERATIONS timed runs"
 for i in $(seq 1 "$ITERATIONS"); do
   log "Run $i/$ITERATIONS – starting nginx"
   # Stop any existing nginx instance (if leftover from previous run)
+  NGINX_PREFIX=$(dirname "$(dirname "$NGINX_CONF")")
   stop_nginx
   # Start nginx with the given config.  The -c option specifies the
   # configuration file; -p sets the prefix (root) directory so that
   # relative paths inside the config resolve correctly.  Here we use
   # the parent directory of the config as prefix.
   # NGINX_PREFIX=$(dirname "$NGINX_CONF")
-  NGINX_PREFIX=$(dirname "$(dirname "$NGINX_CONF")")
   "$NGINX_BIN" -c "$NGINX_CONF" -p "$NGINX_PREFIX"
   # Give nginx a moment to bind sockets
   sleep 2
+
+  # Optional warmup (discard metrics)
+  if (( WARMUP_SECONDS > 0 )); then
+    WLOG="$TMPDIR/warmup_${i}.log"
+    log "Run $i/$ITERATIONS – warmup for ${WARMUP_SECONDS}s (discarding metrics)"
+    "$WRK_BIN" -t "$THREADS" -c "$CONNECTIONS" -d "${WARMUP_SECONDS}s" --latency "$URL" \
+      >"$WLOG" 2>&1 || true
+  fi
 
   # Drive the workload using wrk.  The --latency flag reports detailed
   # latency distribution which may help later analysis.  Write output to

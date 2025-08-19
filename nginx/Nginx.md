@@ -117,12 +117,8 @@ concurrent connections. It starts nginx with your config, drives traffic
 using wrk, parses the `Requests/sec` value and finally computes
 mean/median throughput and standard deviation. Example:
 ```bash
-export NGINX_BIN=$HOME/nginx/sbin/nginx
-export NGINX_CONF=$HOME/nginx/conf/nginx_best.conf
-export WRK_BIN=$HOME/wrk/wrk
-export ITERATIONS=5     # optional: number of runs
-export DURATION=10      # optional: duration in seconds
-
+NGINX_CONF=$HOME/nginx/conf/nginx_best.conf \
+WARMUP_SECONDS=0 ITERATIONS=1 DURATION=30 THREADS=10 CONNECTIONS=10 \ 
 bash $HOME/pcbench/nginx/nginx_bench.sh
 ```
 The script logs per‑run results in a temporary directory and appends a
@@ -147,15 +143,22 @@ rm -rf "$HPCRUN_OUT" && mkdir -p "$HPCRUN_OUT"
     The `--` separates hpcrun options from the command being profiled.
 
 ```bash
+# load hpctoolkit in the terminal
+spack load hpctoolkit
+export NGINX_BIN="$HOME/nginx/sbin/nginx"
+export NGINX_CONF="$HOME/nginx/conf/nginx_best.conf"
+
 # 3. Wrap nginx startup in hpcrun to collect cache-miss events
 hpcrun  -o "$HPCRUN_OUT" \
         -e PAPI_L2_TCM@1000 \
         -e PAPI_L3_TCM@1000 \
-        -- $NGINX_BIN -c $NGINX_CONF -p $(dirname $NGINX_CONF)
+        -- $NGINX_BIN -c $NGINX_CONF -p "$(dirname "$(dirname "$NGINX_CONF")")"
 ```
 ### 5C **Drive the workload** while hpcrun is recording. 
 ```bash
 # 4. In another terminal run nginx with a small number of iterations (e.g. 10 duration 30-60s) to generate traffic.
+NGINX_CONF=$HOME/nginx/conf/nginx_best.conf \
+WARMUP_SECONDS=0 ITERATIONS=1 DURATION=30 THREADS=10 CONNECTIONS=10 \ 
 bash $HOME/pcbench/nginx/nginx_bench.sh
 # 5. Stop nginx after the workload completes
 nginx -s stop
@@ -203,7 +206,8 @@ to a new configuration file (e.g. `nginx_optimized.conf`).
 
 Repeat the benchmarking step with your optimized configuration:
 ```bash
-export NGINX_CONF=$HOME/nginx/conf/nginx_optimized.conf
+NGINX_CONF=$HOME/nginx/conf/nginx_optimized.conf \
+WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 CONNECTIONS=10 \ 
 bash $HOME/pcbench/nginx/nginx_bench.sh
 ```
 Compare the mean and median throughputs against those of the original
