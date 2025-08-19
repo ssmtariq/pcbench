@@ -209,6 +209,8 @@ NGINX_CONF=$HOME/nginx/conf/nginx_best.conf \
 WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 CONNECTIONS=10 \
 bash $HOME/pcbench/nginx/nginx_bench.sh
 
+#Test optimized config
+nginx -t -c ~/nginx/conf/nginx_optimized.conf
 # Run optimized config
 NGINX_CONF=$HOME/nginx/conf/nginx_optimized.conf \
 WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 CONNECTIONS=10 \
