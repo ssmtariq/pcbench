@@ -34,12 +34,12 @@ NGINX_CONF=${NGINX_CONF:-"$HOME/nginx/conf/nginx.conf"}
 WRK_BIN=${WRK_BIN:-"$HOME/wrk/wrk"}
 
 # Default URL to benchmark; adjust if your server listens elsewhere.
-URL=${URL:-"http://localhost/"}
+URL=${URL:-"http://localhost:8080/"}
 
 # Number of iterations to run.  Each iteration restarts nginx and
 # performs one measurement run.  More iterations yield smoother
 # statistics but take longer.
-ITERATIONS=${ITERATIONS:-10}
+ITERATIONS=${ITERATIONS:-1}
 
 # Duration of each wrk run (in seconds).  Increase for more stable
 # measurements.
@@ -47,8 +47,9 @@ DURATION=${DURATION:-30}
 
 # Number of wrk threads and open connections.  Choose values that
 # saturate your server without causing resource exhaustion.
-THREADS=${THREADS:-4}
-CONNECTIONS=${CONNECTIONS:-64}
+THREADS=${THREADS:-10}
+CONNECTIONS=${CONNECTIONS:-10}
+WARMUP_SECONDS=${WARMUP_SECONDS:-0}
 
 # -------- derived constants --------------------------------------------------
 TMPDIR=$(mktemp -d)
@@ -70,7 +71,7 @@ log "Iterations     : $ITERATIONS (duration ${DURATION}s, threads ${THREADS}, co
 # Function to stop nginx quietly
 stop_nginx() {
   if pgrep -x nginx >/dev/null 2>&1; then
-    "$NGINX_BIN" -c "$NGINX_CONF" -s stop >/dev/null 2>&1 || true
+    "$NGINX_BIN" -c "$NGINX_CONF" -p "$NGINX_PREFIX" -s stop >/dev/null 2>&1 || true
     # Wait for processes to exit
     sleep 2
   fi
@@ -86,7 +87,8 @@ for i in $(seq 1 "$ITERATIONS"); do
   # configuration file; -p sets the prefix (root) directory so that
   # relative paths inside the config resolve correctly.  Here we use
   # the parent directory of the config as prefix.
-  NGINX_PREFIX=$(dirname "$NGINX_CONF")
+  # NGINX_PREFIX=$(dirname "$NGINX_CONF")
+  NGINX_PREFIX=$(dirname "$(dirname "$NGINX_CONF")")
   "$NGINX_BIN" -c "$NGINX_CONF" -p "$NGINX_PREFIX"
   # Give nginx a moment to bind sockets
   sleep 2
