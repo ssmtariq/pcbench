@@ -118,7 +118,7 @@ using wrk, parses the `Requests/sec` value and finally computes
 mean/median throughput and standard deviation. Example:
 ```bash
 NGINX_CONF=$HOME/nginx/conf/nginx_best.conf \
-WARMUP_SECONDS=0 ITERATIONS=1 DURATION=30 THREADS=10 CONNECTIONS=10 \ 
+WARMUP_SECONDS=0 ITERATIONS=1 DURATION=30 THREADS=10 CONNECTIONS=10 \
 bash $HOME/pcbench/nginx/nginx_bench.sh
 ```
 The script logs per‑run results in a temporary directory and appends a
@@ -156,10 +156,8 @@ hpcrun  -o "$HPCRUN_OUT" \
 ```
 ### 5C **Drive the workload** while hpcrun is recording. 
 ```bash
-# 4. In another terminal run nginx with a small number of iterations (e.g. 10 duration 30-60s) to generate traffic.
-NGINX_CONF=$HOME/nginx/conf/nginx_best.conf \
-WARMUP_SECONDS=0 ITERATIONS=1 DURATION=30 THREADS=10 CONNECTIONS=10 \ 
-bash $HOME/pcbench/nginx/nginx_bench.sh
+# 4. Profile nginx
+"$HOME/wrk/wrk" -t 10 -c 10 -d 60s --latency http://localhost:8080/
 # 5. Stop nginx after the workload completes
 nginx -s stop
 ```
@@ -202,12 +200,18 @@ Present the exported images to ChatGPT and ask for suggestions on which
 nginx knobs could improve cache locality. Apply the recommended changes
 to a new configuration file (e.g. `nginx_optimized.conf`).
 
-## 7. Re‑evaluate the optimized configuration
+## 7. Re‑evaluate the orignal and optimized configuration
 
 Repeat the benchmarking step with your optimized configuration:
 ```bash
+#Run original config
+NGINX_CONF=$HOME/nginx/conf/nginx_best.conf \
+WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 CONNECTIONS=10 \
+bash $HOME/pcbench/nginx/nginx_bench.sh
+
+# Run optimized config
 NGINX_CONF=$HOME/nginx/conf/nginx_optimized.conf \
-WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 CONNECTIONS=10 \ 
+WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 CONNECTIONS=10 \
 bash $HOME/pcbench/nginx/nginx_bench.sh
 ```
 Compare the mean and median throughputs against those of the original
