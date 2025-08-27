@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Redis repeat-runner (memtier) with warmup + median ops/sec report
+# Redis repeat‑runner (YCSB) with warm‑up + median throughput report
+#
+# This script exercises a Redis instance using the Yahoo Cloud Serving
+# Benchmark (YCSB).  It starts the server, loads a dataset, runs a brief
+# warm‑up and then performs multiple measured runs.  Throughput values
+# extracted from YCSB’s `[OVERALL], Throughput(ops/sec)` line are
+# aggregated into median/mean/stddev and appended to a log file.
+#
+# The workload shape (record count, operation count, thread count and
+# durations) defaults to the values used in TUNA’s ycsb.json【955028669945652†L1-L9】, but can
+# be overridden via environment variables.
 # -----------------------------------------------------------------------------
 set -Eeuo pipefail
 shopt -s inherit_errexit
@@ -11,28 +21,32 @@ trap 'fatal "Command \"${BASH_COMMAND}\" failed (line ${LINENO})"' ERR
 
 REDIS_SERVER=${REDIS_SERVER:-$(command -v redis-server || true)}
 REDIS_CLI=${REDIS_CLI:-$(command -v redis-cli || true)}
-MEMTIER=${MEMTIER:-$(command -v memtier_benchmark || true)}
+
+# Location of YCSB installation.  By default the script expects YCSB
+# to be unpacked or built under $HOME/YCSB.  Override YCSB_DIR to use
+# another location.
+YCSB_DIR=${YCSB_DIR:-$HOME/YCSB}
+YCSB_BIN=${YCSB_BIN:-$YCSB_DIR/bin/ycsb.sh}
+
 REDIS_CONF=${REDIS_CONF:-$HOME/TUNA_best_redis_config.conf}
 REDIS_PORT=${REDIS_PORT:-6379}
 REDIS_HOST=${REDIS_HOST:-127.0.0.1}
 
-# Benchmark shape (tweak as needed)
-WARMUP_TIME=${WARMUP_TIME:-60}
-MEASURE_TIME=${MEASURE_TIME:-180}
-THREADS=${THREADS:-4}
-CLIENTS_PER_THREAD=${CLIENTS_PER_THREAD:-25}
-PIPELINE=${PIPELINE:-32}
-RATIO=${RATIO:-1:1}
-DATA_SIZE=${DATA_SIZE:-512}       # bytes
-KEY_MAX=${KEY_MAX:-500000}
-
-ITERATIONS=${ITERATIONS:-10}
+# Workload parameters (can be overridden via env).  These mirror
+# TUNA’s ycsb.json【955028669945652†L1-L9】.
+WORKLOAD=${WORKLOAD:-workloada}
+RECORDCOUNT=${RECORDCOUNT:-1800000}
+OPERATIONCOUNT=${OPERATIONCOUNT:-2000000000}
+THREADCOUNT=${THREADCOUNT:-40}
+WARMUP_TIME=${WARMUP_TIME:-30}
+MEASURE_TIME=${MEASURE_TIME:-300}
+ITERATIONS=${ITERATIONS:-3}
 TMPDIR="$(mktemp -d)"
 THR_FILE="$TMPDIR/throughputs.txt"
 RESULTS_FILE="${RESULTS_FILE:-$HOME/redis_bench_results.log}"
 
 [[ -x "$REDIS_SERVER" ]] || fatal "redis-server not found; set REDIS_SERVER=/path/to/redis-server"
-[[ -x "$MEMTIER" ]] || fatal "memtier_benchmark not found; install and/or set MEMTIER"
+[[ -x "$YCSB_BIN" ]] || fatal "YCSB launcher not found; set YCSB_DIR to your YCSB installation"
 
 start_redis() {
   log "Starting redis-server on $REDIS_HOST:$REDIS_PORT with $REDIS_CONF"
@@ -49,54 +63,55 @@ stop_redis() {
   sleep 1
 }
 
+# Extract throughput (ops/sec) from YCSB run output.  YCSB prints a line like:
+# [OVERALL], Throughput(ops/sec), 12345.678
 extract_ops() {
-  # Parse Ops/sec from memtier output (Totals Ops/sec: <num>)
-  grep -oP '(?i)Ops/sec:\s+\K[0-9.]+' "$1" | tail -n1
-}
-
-prefill() {
-  log "Prefill dataset with SETs (~5% of keyspace)"
-  "$MEMTIER" -s "$REDIS_HOST" -p "$REDIS_PORT" \
-    --hide-histogram \
-    --ratio=1:0 --data-size="$DATA_SIZE" \
-    --key-minimum=1 --key-maximum="$KEY_MAX" \
-    --pipeline="$PIPELINE" --threads="$THREADS" --clients="$CLIENTS_PER_THREAD" \
-    --requests="$(( KEY_MAX / 20 ))" >/dev/null
+  grep -i 'Throughput(ops/sec)' "$1" | tail -n1 | awk -F, '{gsub(/ /,"",$3); print $3}'
 }
 
 log "Workspace : $TMPDIR"
 start_redis
-prefill
+
+# Load the dataset once before running experiments.  This populates the
+# database with the specified number of records.
+log "Loading initial dataset (recordcount=$RECORDCOUNT) into Redis via YCSB"
+"$YCSB_BIN" load redis \
+  -s -P "$YCSB_DIR/workloads/$WORKLOAD" \
+  -p recordcount="$RECORDCOUNT" \
+  -p operationcount="$OPERATIONCOUNT" \
+  -p threadcount="$THREADCOUNT" \
+  -p redis.host="$REDIS_HOST" \
+  -p redis.port="$REDIS_PORT" \
+  > "$TMPDIR/load.log" 2>&1
+
+# Warm‑up run
+log "Warm‑up for ${WARMUP_TIME}s"
+"$YCSB_BIN" run redis \
+  -s -P "$YCSB_DIR/workloads/$WORKLOAD" \
+  -p recordcount="$RECORDCOUNT" \
+  -p operationcount="$OPERATIONCOUNT" \
+  -p threadcount="$THREADCOUNT" \
+  -p maxexecutiontime="$WARMUP_TIME" \
+  -p redis.host="$REDIS_HOST" \
+  -p redis.port="$REDIS_PORT" \
+  > "$TMPDIR/warmup.log" 2>&1 || true
 
 log "Starting $ITERATIONS timed runs"
 for i in $(seq 1 "$ITERATIONS"); do
-  # Flush between runs for repeatability
-  if [[ -x "$REDIS_CLI" ]]; then "$REDIS_CLI" -h "$REDIS_HOST" -p "$REDIS_PORT" FLUSHALL >/dev/null; fi
-
-  # Warmup
-  WLOG="$TMPDIR/warmup_${i}.log"
-  log "Run $i/$ITERATIONS – warmup ${WARMUP_TIME}s"
-  "$MEMTIER" -s "$REDIS_HOST" -p "$REDIS_PORT" \
-    --hide-histogram \
-    --test-time="$WARMUP_TIME" \
-    --ratio="$RATIO" --data-size="$DATA_SIZE" \
-    --key-minimum=1 --key-maximum="$KEY_MAX" \
-    --pipeline="$PIPELINE" --threads="$THREADS" --clients="$CLIENTS_PER_THREAD" \
-    > "$WLOG" 2>&1 || true
-
-  # Measured
   LOG="$TMPDIR/run_${i}.log"
   log "Run $i/$ITERATIONS – measure ${MEASURE_TIME}s"
-  "$MEMTIER" -s "$REDIS_HOST" -p "$REDIS_PORT" \
-    --hide-histogram \
-    --test-time="$MEASURE_TIME" \
-    --ratio="$RATIO" --data-size="$DATA_SIZE" \
-    --key-minimum=1 --key-maximum="$KEY_MAX" \
-    --pipeline="$PIPELINE" --threads="$THREADS" --clients="$CLIENTS_PER_THREAD" \
+  "$YCSB_BIN" run redis \
+    -s -P "$YCSB_DIR/workloads/$WORKLOAD" \
+    -p recordcount="$RECORDCOUNT" \
+    -p operationcount="$OPERATIONCOUNT" \
+    -p threadcount="$THREADCOUNT" \
+    -p maxexecutiontime="$MEASURE_TIME" \
+    -p redis.host="$REDIS_HOST" \
+    -p redis.port="$REDIS_PORT" \
     > "$LOG" 2>&1
 
   tp=$(extract_ops "$LOG")
-  [[ -n "$tp" ]] || fatal "Could not parse Ops/sec from $LOG"
+  [[ -n "$tp" ]] || fatal "Could not parse throughput from $LOG"
   printf '%s\n' "$tp" >> "$THR_FILE"
   log "Run $i/$ITERATIONS – throughput = $tp ops/sec"
 done

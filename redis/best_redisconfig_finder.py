@@ -1,41 +1,101 @@
 #!/usr/bin/env python3
 """
-best_redisconfig_finder.py — choose the best Redis config from full_seed1.csv
+best_redisconfig_finder.py – choose the best Redis configuration from
+TUNA’s tuning results.
 
-Input columns (single CSV):
-  - CleanConfig      : stringified Python dict of Redis settings
-  - Budget           : numeric (analogous to Worker; optional filter)
-  - Reported Value   : numeric reward/throughput to maximize
+This script mirrors the logic of ``best_nginx_config_finder.py``: it
+ensures that the TUNA repository is available locally, locates the
+``full_seed1.csv`` file in ``src/results_redis`` and selects the
+configuration with the highest reported performance.  The CSV file
+contains three columns:
 
-Outputs:
-  - TUNA_best_redis_config.json  (machine-readable)
-  - TUNA_best_redis_config.conf  (redis.conf-style, ready to run)
+  - ``CleanConfig``: a stringified Python dict of Redis settings
+  - ``Budget``: numeric value analogous to ``Worker`` (optional filter)
+  - ``Reported Value``: measured throughput to maximise
 
-Usage:
+The resulting configuration is written both as pretty‑printed JSON and
+as a ``redis.conf``–style file.
+
+Example usage:
+
   python3 best_redisconfig_finder.py \
-      --csv src/results_redis/full_seed1.csv \
       --min-budget 0 \
       --out-json TUNA_best_redis_config.json \
       --out-conf TUNA_best_redis_config.conf
+
+If you do not supply a ``--csv`` path, the script will clone the
+``ssmtariq/TUNA`` repository (development branch) into a temporary
+directory and read ``src/results_redis/full_seed1.csv`` from that
+checkout.  You can override the CSV location with ``--csv``.
 """
 
-import argparse, ast, json, sys
+import argparse
+import ast
+import json
+import logging
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
+
 import pandas as pd
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--csv", default="src/results_redis/full_seed1.csv",
-                   help="Path to full_seed1.csv")
-    p.add_argument("--min-budget", type=float, default=None,
-                   help="Optional: keep rows where Budget >= this value")
-    p.add_argument("--goal", choices=["max", "min"], default="max",
-                   help="Maximize or minimize Reported Value (default: max)")
-    p.add_argument("--out-json", default="TUNA_best_redis_config.json")
-    p.add_argument("--out-conf", default="TUNA_best_redis_config.conf")
+    p.add_argument(
+        "--csv",
+        default=None,
+        help=(
+            "Path to full_seed1.csv; if omitted, the script clones the "
+            "TUNA repository and uses src/results_redis/full_seed1.csv from that checkout"
+        ),
+    )
+    p.add_argument(
+        "--min-budget",
+        type=float,
+        default=None,
+        help="Optional: keep rows where Budget >= this value",
+    )
+    p.add_argument(
+        "--goal",
+        choices=["max", "min"],
+        default="max",
+        help="Maximize or minimize Reported Value (default: max)",
+    )
+    p.add_argument(
+        "--out-json",
+        default="TUNA_best_redis_config.json",
+        help="Output file for the JSON config",
+    )
+    p.add_argument(
+        "--out-conf",
+        default="TUNA_best_redis_config.conf",
+        help="Output file for the redis.conf config",
+    )
     return p.parse_args()
 
+# Constants pointing to the TUNA repo and CSV location.  Change these
+# if you wish to target a different repository or location.
+REPO_URL = "https://github.com/ssmtariq/TUNA"
+CSV_REL_PATH = Path("src/results_redis/full_seed1.csv")
+# Use a temporary directory under the system temp area for the clone
+TMPDIR = Path(tempfile.gettempdir()) / "TUNA_ssmtariq"
+
+
+def clone_if_needed(url: str, dest: Path) -> Path:
+    """Clone the repository at ``url`` into ``dest`` if it doesn't exist."""
+    if dest.exists():
+        return dest
+    logging.info("Cloning %s into %s", url, dest)
+    # Clone only the development branch to reduce download size
+    subprocess.run(
+        ["git", "clone", "--depth", "1", "--branch", "development", url, str(dest)],
+        check=True,
+    )
+    return dest
+
 def load_csv(path: Path) -> pd.DataFrame:
+    """Read a CSV and validate required columns."""
     try:
         df = pd.read_csv(path)
     except Exception:
@@ -45,7 +105,7 @@ def load_csv(path: Path) -> pd.DataFrame:
     missing = need.difference(df.columns)
     if missing:
         sys.exit(f"✗ Missing columns {missing} in {path}")
-    # strip obvious unnamed index col if present
+    # strip an auto‑generated index column if present
     if "Unnamed: 0" in df.columns:
         df = df.drop(columns=["Unnamed: 0"])
     return df
@@ -86,9 +146,26 @@ def write_redis_conf(d: dict, out_conf: Path):
     out_conf.write_text("\n".join(lines) + "\n")
     print("✓ wrote", out_conf)
 
-def main():
+def main() -> None:
     args = parse_args()
-    csv_path = Path(args.csv)
+    # Configure basic logging
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+    # Determine the CSV path: if the user supplied --csv and the file exists,
+    # use it directly.  Otherwise clone the repo and use the default path.
+    if args.csv and Path(args.csv).exists():
+        csv_path = Path(args.csv)
+    else:
+        repo_dir = clone_if_needed(REPO_URL, TMPDIR)
+        csv_path = repo_dir / CSV_REL_PATH
+        if not csv_path.exists():
+            # try to find the CSV somewhere under the repository
+            matches = list(repo_dir.rglob("full_seed1.csv"))
+            if not matches:
+                sys.exit("✗ No full_seed1.csv found in the cloned TUNA repository")
+            csv_path = matches[0]
+
+    logging.info("Reading tuning results from %s", csv_path)
     df = load_csv(csv_path)
     best = pick_best(df, args.min_budget, args.goal)
     cfg = sanitize_config_str(best["CleanConfig"])
@@ -97,7 +174,12 @@ def main():
     print("---")
     print("Budget        :", best["Budget"])
     print("Reported Value:", best["Reported Value"])
-    print("Source CSV    :", csv_path)
+    # Print the source CSV relative to the repo when applicable
+    try:
+        rel = csv_path.relative_to(repo_dir)  # type: ignore[name-defined]
+        print("Source CSV    :", rel)
+    except Exception:
+        print("Source CSV    :", csv_path)
 
 if __name__ == "__main__":
     main()
