@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Redis repeat‑runner (YCSB) with warm‑up + median throughput report
+# Redis repeat-runner (YCSB) with warm-up + median throughput report
 #
-# This script exercises a Redis instance using the Yahoo Cloud Serving
-# Benchmark (YCSB).  It starts the server, loads a dataset, runs a brief
-# warm‑up and then performs multiple measured runs.  Throughput values
-# extracted from YCSB’s `[OVERALL], Throughput(ops/sec)` line are
-# aggregated into median/mean/stddev and appended to a log file.
+# Usage pattern mirrors nginx_bench.sh via environment variables:
+#   REDIS_CONF=... WARMUP_SECONDS=... ITERATIONS=... DURATION=... THREADS=... \
+#   bash workload_runner_redis.sh
 #
-# The workload shape (record count, operation count, thread count and
-# durations) defaults to the values used in TUNA’s ycsb.json【955028669945652†L1-L9】, but can
-# be overridden via environment variables.
+# Optional YCSB/Redis knobs:
+#   RECORDCOUNT (default 1800000)
+#   OPERATIONCOUNT (default 2000000000)
+#   WORKLOAD (default workloada)
+#   YCSB_DIR (default $HOME/YCSB)
+#   SKIP_LOAD=1   # set to skip the load phase (if you preloaded once)
+#
+# The script starts redis-server with REDIS_CONF, (optionally) loads the
+# dataset with YCSB, runs an optional warm-up, then iterates N timed runs,
+# parsing YCSB’s “[OVERALL], Throughput(ops/sec)” and reporting median/mean/std.
 # -----------------------------------------------------------------------------
 set -Eeuo pipefail
 shopt -s inherit_errexit
@@ -22,31 +27,41 @@ trap 'fatal "Command \"${BASH_COMMAND}\" failed (line ${LINENO})"' ERR
 REDIS_SERVER=${REDIS_SERVER:-$(command -v redis-server || true)}
 REDIS_CLI=${REDIS_CLI:-$(command -v redis-cli || true)}
 
-# Location of YCSB installation.  By default the script expects YCSB
-# to be unpacked or built under $HOME/YCSB.  Override YCSB_DIR to use
-# another location.
+# YCSB location
 YCSB_DIR=${YCSB_DIR:-$HOME/YCSB}
 YCSB_BIN=${YCSB_BIN:-$YCSB_DIR/bin/ycsb.sh}
 
+# Config & server endpoint
 REDIS_CONF=${REDIS_CONF:-$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf}
 REDIS_PORT=${REDIS_PORT:-6379}
 REDIS_HOST=${REDIS_HOST:-127.0.0.1}
 
-# Workload parameters (can be overridden via env).  These mirror
-# TUNA’s ycsb.json【955028669945652†L1-L9】.
+# Core workload shape (defaults mirror your current README/script)
 WORKLOAD=${WORKLOAD:-workloada}
 RECORDCOUNT=${RECORDCOUNT:-1800000}
 OPERATIONCOUNT=${OPERATIONCOUNT:-2000000000}
-THREADCOUNT=${THREADCOUNT:-40}
+
+# “nginx-style” knobs, with compatibility mapping
 WARMUP_TIME=${WARMUP_TIME:-30}
 MEASURE_TIME=${MEASURE_TIME:-300}
+THREADCOUNT=${THREADCOUNT:-40}
 ITERATIONS=${ITERATIONS:-3}
+
+# Allow nginx-style env names:
+if [[ -n "${WARMUP_SECONDS:-}" ]]; then WARMUP_TIME="$WARMUP_SECONDS"; fi
+if [[ -n "${DURATION:-}" ]]; then MEASURE_TIME="$DURATION"; fi
+if [[ -n "${THREADS:-}" ]]; then THREADCOUNT="$THREADS"; fi
+
+# Optional: skip load if already pre-loaded (set SKIP_LOAD=1)
+SKIP_LOAD=${SKIP_LOAD:-0}
+
 TMPDIR="$(mktemp -d)"
 THR_FILE="$TMPDIR/throughputs.txt"
 RESULTS_FILE="${RESULTS_FILE:-$HOME/redis_bench_results.log}"
 
 [[ -x "$REDIS_SERVER" ]] || fatal "redis-server not found; set REDIS_SERVER=/path/to/redis-server"
-[[ -x "$YCSB_BIN" ]] || fatal "YCSB launcher not found; set YCSB_DIR to your YCSB installation"
+[[ -x "$YCSB_BIN" ]]     || fatal "YCSB launcher not found; set YCSB_DIR to your YCSB installation"
+[[ -f "$REDIS_CONF" ]]   || fatal "Redis config not found: $REDIS_CONF"
 
 start_redis() {
   log "Starting redis-server on $REDIS_HOST:$REDIS_PORT with $REDIS_CONF"
@@ -63,38 +78,48 @@ stop_redis() {
   sleep 1
 }
 
-# Extract throughput (ops/sec) from YCSB run output.  YCSB prints a line like:
-# [OVERALL], Throughput(ops/sec), 12345.678
+# Extract throughput (ops/sec) from YCSB run output: “[OVERALL], Throughput(ops/sec), 12345.678”
 extract_ops() {
   grep -i 'Throughput(ops/sec)' "$1" | tail -n1 | awk -F, '{gsub(/ /,"",$3); print $3}'
 }
 
 log "Workspace : $TMPDIR"
+log "Config    : $REDIS_CONF"
+log "Threads   : $THREADCOUNT"
+log "Warmup    : ${WARMUP_TIME}s"
+log "Duration  : ${MEASURE_TIME}s"
+log "Iters     : $ITERATIONS"
+log "Recordcount: $RECORDCOUNT  Operationcount: $OPERATIONCOUNT"
 start_redis
 
-# Load the dataset once before running experiments.  This populates the
-# database with the specified number of records.
-log "Loading initial dataset (recordcount=$RECORDCOUNT) into Redis via YCSB"
-"$YCSB_BIN" load redis \
-  -s -P "$YCSB_DIR/workloads/$WORKLOAD" \
-  -p recordcount="$RECORDCOUNT" \
-  -p operationcount="$OPERATIONCOUNT" \
-  -p threadcount="$THREADCOUNT" \
-  -p redis.host="$REDIS_HOST" \
-  -p redis.port="$REDIS_PORT" \
-  > "$TMPDIR/load.log" 2>&1
+# Optional dataset load
+if [[ "$SKIP_LOAD" -ne 1 ]]; then
+  log "Loading dataset (recordcount=$RECORDCOUNT) via YCSB"
+  "$YCSB_BIN" load redis \
+    -s -P "$YCSB_DIR/workloads/$WORKLOAD" \
+    -p recordcount="$RECORDCOUNT" \
+    -p operationcount="$OPERATIONCOUNT" \
+    -p threadcount="$THREADCOUNT" \
+    -p redis.host="$REDIS_HOST" \
+    -p redis.port="$REDIS_PORT" \
+    > "$TMPDIR/load.log" 2>&1
+else
+  log "SKIP_LOAD=1 – skipping YCSB load phase"
+fi
 
-# Warm‑up run
-log "Warm‑up for ${WARMUP_TIME}s"
-"$YCSB_BIN" run redis \
-  -s -P "$YCSB_DIR/workloads/$WORKLOAD" \
-  -p recordcount="$RECORDCOUNT" \
-  -p operationcount="$OPERATIONCOUNT" \
-  -p threadcount="$THREADCOUNT" \
-  -p maxexecutiontime="$WARMUP_TIME" \
-  -p redis.host="$REDIS_HOST" \
-  -p redis.port="$REDIS_PORT" \
-  > "$TMPDIR/warmup.log" 2>&1 || true
+# Optional warm-up
+if (( WARMUP_TIME > 0 )); then
+  log "Warm-up for ${WARMUP_TIME}s"
+  "$YCSB_BIN" run redis \
+    -s -P "$YCSB_DIR/workloads/$WORKLOAD" \
+    -p recordcount="$RECORDCOUNT" \
+    -p operationcount="$OPERATIONCOUNT" \
+    -p threadcount="$THREADCOUNT" \
+    -p maxexecutiontime="$WARMUP_TIME" \
+    -p redis.host="$REDIS_HOST" \
+    -p redis.port="$REDIS_PORT" \
+    > "$TMPDIR/warmup.log" 2>&1 || true
+fi
 
 log "Starting $ITERATIONS timed runs"
 for i in $(seq 1 "$ITERATIONS"); do
