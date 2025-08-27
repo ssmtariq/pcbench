@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
 """
 best_redisconfig_finder.py – choose the best Redis configuration from
-TUNA’s tuning results.
-
-This script mirrors the logic of ``best_nginx_config_finder.py``: it
-ensures that the TUNA repository is available locally, locates the
+TUNA’s tuning results. It ensures that the TUNA repository is available locally, locates the
 ``full_seed1.csv`` file in ``src/results_redis`` and selects the
-configuration with the highest reported performance.  The CSV file
-contains three columns:
-
-  - ``CleanConfig``: a stringified Python dict of Redis settings
-  - ``Budget``: numeric value analogous to ``Worker`` (optional filter)
-  - ``Reported Value``: measured throughput to maximise
-
-The resulting configuration is written both as pretty‑printed JSON and
+configuration with the highest reported performance. The resulting configuration is written both as pretty‑printed JSON and
 as a ``redis.conf``–style file.
 
 Example usage:
