@@ -49,7 +49,7 @@ export PATH=$HOME/redis-7.2/bin:$PATH
 
 # Sanity check
 redis-server --version
-````
+```
 
 > Notes
 > – Official instructions for building from source on Ubuntu Jammy are here; the
@@ -58,51 +58,93 @@ redis-server --version
 
 ---
 
-## 2. Install a workload generator (we’ll use **memtier\_benchmark**)
+## 2. Install YCSB workload generator
 
-Option A — build from source (works reliably on xl170):
+TUNA’s Redis experiments rely on the Yahoo Cloud Serving Benchmark (YCSB)
+to generate load. YCSB is a Java‑based tool that supports many databases 
+(including Redis) and allows you to specify
+properties such as the number of records, operations and worker threads.
+The benchmark description bundled with TUNA (`ycsb.json`) defines
+workloada with a warm‑up of 30 s, a benchmark duration of 300 s and
+workload properties such as recordcount 1.8 million,
+operationcount 2 billion and threadcount 40.
+
+Follow these steps to build and install YCSB:
+### 2A. Install Java and Maven. 
+YCSB requires a recent JDK and Maven 3 to build from source
 
 ```bash
-sudo apt-get install -y autoconf automake libtool \
-    build-essential libpcre3-dev libevent-dev pkg-config zlib1g-dev libssl-dev git
+sudo apt-get update
+sudo apt-get install -y openjdk-11-jdk maven git
+```
+### 2B. Clone and build YCSB. 
+Clone the upstream repository and compile
+only the Redis binding. The YCSB README notes that building the full
+distribution uses `mvn clean package`, while a single binding can
+be compiled with the `-pl` option
 
+```bash
 cd ~
-git clone https://github.com/RedisLabs/memtier_benchmark.git
-cd memtier_benchmark
-autoreconf -ivf
-./configure
-make -j8
-sudo make install  # installs memtier_benchmark into /usr/local/bin
-which memtier_benchmark
+git clone https://github.com/brianfrankcooper/YCSB.git
+cd YCSB
+# Build only the Redis binding to reduce dependencies
+mvn -pl site.ycsb:redis-binding -am clean package
+```
+When the build completes, the launcher script `bin/ycsb.sh` will be
+available under your `~/YCSB` directory. All workload templates are
+located under `~/YCSB/workloads`. It’s convenient to export
+`YCSB_DIR=~/YCSB` so the benchmarking scripts can find it.
+
+### 2C. (Optional) Use a pre‑built release. 
+If you prefer not to build from source, the YCSB project publishes tarball releases. 
+Downloading and unpacking a release follows the example in the YCSB README
+
+```bash
+curl -L -o ycsb-0.17.0.tar.gz \
+  https://github.com/brianfrankcooper/YCSB/releases/download/0.17.0/ycsb-0.17.0.tar.gz
+tar xfvz ycsb-0.17.0.tar.gz
+mv ycsb-0.17.0 ~/YCSB
+echo 'export YCSB_DIR=~/YCSB' >> ~/.bashrc
+export YCSB_DIR=~/YCSB
 ```
 
-Option B — use `redis-benchmark` (ships with Redis). This is fine for smoke-tests,
-but use **memtier** for realistic multi-threaded, pipelined workloads.
+Quick YCSB Sanity Check
+
+```bash
+# start redis
+redis-server $HOME/pcbench/redis/configs/TUNA_best_redis_config.conf --port 6379 --protected-mode no
+# run ycsb
+$YCSB_DIR/bin/ycsb.sh run redis \
+  -s -P $YCSB_DIR/workloads/workloada \
+  -p recordcount=1800000 \
+  -p operationcount=2000000000 \
+  -p threadcount=10 \
+  -p maxexecutiontime=30 \
+  -p redis.host=127.0.0.1 \
+  -p redis.port=6379
+# stop redis
+redis-cli shutdown nosave 2>/dev/null || true
+```
+With YCSB built or unpacked, you’re ready to run the benchmarks.
 
 ---
 
 ## 3. Select the **best TUNA Redis config** from `src/results_redis/full_seed1.csv`
 
 ```bash
-# In your repo root (where this script lives), run:
-python3 best_redisconfig_finder.py \
-  --csv src/results_redis/full_seed1.csv \
-  --out-json TUNA_best_redis_config.json \
-  --out-conf TUNA_best_redis_config.conf
+cd ~
+python3 pcbench/redis/best_redisconfig_finder.py
 
-# Outputs:
+# The script writes the following files to home directory as:
 #  - TUNA_best_redis_config.json  (machine-readable)
 #  - TUNA_best_redis_config.conf  (redis.conf-style, ready to run)
 ```
-
-> This mirrors your Postgres config selector: read a CSV, choose the row with the
-> **best reported performance**, and emit a config the server can consume.
 
 ---
 
 ## 4. **Profile Redis** with HPCToolkit (cache-miss sampling)
 
-> We wrap **redis-server** with `hpcrun` and then drive load with memtier.
+### 4A. We wrap **redis-server** with `hpcrun` and then drive load with YCSB.
 
 ```bash
 # Stop any running instance
@@ -114,26 +156,31 @@ export HPCRUN_TMPDIR=$HPCRUN_OUT
 
 # Start redis-server under hpcrun, using the selected TUNA config
 hpcrun -o "$HPCRUN_OUT" \
-       -e PAPI_L2_TCM@100000 \
-       -e PAPI_L3_TCM@100000 \
-       -- redis-server $HOME/TUNA_best_redis_config.conf --port 6379 --protected-mode no
+       -e PAPI_L2_TCM@1000 \
+       -e PAPI_L3_TCM@1000 \
+       -- redis-server $HOME/pcbench/redis/configs/TUNA_best_redis_config.conf --port 6379 --protected-mode no
 ```
 
-In another terminal, **drive the workload** while `hpcrun` is active:
+### 4B. In another terminal, **drive the workload** while `hpcrun` is active:
 
 ```bash
-memtier_benchmark -s 127.0.0.1 -p 6379 \
-  --test-time=180 --threads=4 --clients=25 --pipeline=32 \
-  --ratio=1:1 --data-size=512 --key-minimum=1 --key-maximum=500000
+$YCSB_DIR/bin/ycsb.sh run redis \
+  -s -P $YCSB_DIR/workloads/workloada \
+  -p recordcount=1800000 \
+  -p operationcount=2000000000 \
+  -p threadcount=10 \
+  -p maxexecutiontime=60 \
+  -p redis.host=127.0.0.1 \
+  -p redis.port=6379
 ```
 
-Stop the server when done:
+### 4C. Stop the server when done:
 
 ```bash
 redis-cli shutdown nosave
 ```
 
-**Build the performance database for hpcviewer**:
+### 4D. Build the performance database for **hpcviewer**:
 
 ```bash
 # 1) Structural analysis (DWARF) for redis-server binary and measurements
@@ -146,7 +193,27 @@ hpcprof -j 8 -S $HOME/redis-server.hpcstruct -o $HOME/hpctoolkit-redis-database 
 
 ---
 
-## 5. Evaluate the **ORIGINAL (selected) TUNA config**
+## 5. Inspect hotspots in **hpcviewer** and iterate configs
+
+Export your hpctoolkit database and open it locally in **hpcviewer**.
+Capture screenshots of top L2/L3-miss call paths (e.g., dict/listpack ops,
+AOF I/O paths, defrag, rehash). 
+
+```bash
+sudo apt install -y zip unzip
+# zip the database for shipping
+zip -r hpctoolkit-redis-database.zip hpctoolkit-redis-database
+# Copy the db from cloudlab to your local machine
+scp -r -p 22 USERNAME@NODE.CLUSTER.cloudlab.us:/users/USERNAME/hpctoolkit-redis-database.zip .
+```
+
+Use those images to ask ChatGPT for a
+config-level hypothesis (e.g., `hash-max-listpack-*`, `activedefrag`,
+AOF rewrite/fsync cadence).
+
+---
+
+## 6. Evaluate the **ORIGINAL (selected) TUNA config**
 
 Use the Redis benchmarking runner (warmup + N runs + summary):
 
@@ -159,19 +226,11 @@ chmod +x workload_runner_redis.sh
 This script:
 
 * starts `redis-server` with `TUNA_best_redis_config.conf`,
-* runs a short warmup,
-* runs **N iterations** of a timed memtier workload,
+* loads the initial YCSB dataset (recordcount ≈ 1.8 M) into Redis using `ycsb load redis`,
+* runs a short warm‑up using YCSB (default 30 s),
+* runs **N iterations** of a timed YCSB workload (default 300 s),
+* parses the [OVERALL], Throughput(ops/sec) line from YCSB’s output,
 * reports **median/mean/stdev** and appends to `~/redis_bench_results.log`.
-
----
-
-## 6. Inspect hotspots in **hpcviewer** and iterate configs
-
-Export your hpctoolkit database and open it locally in **hpcviewer**.
-Capture screenshots of top L2/L3-miss call paths (e.g., dict/listpack ops,
-AOF I/O paths, defrag, rehash). Use those images to ask ChatGPT for a
-config-level hypothesis (e.g., `hash-max-listpack-*`, `activedefrag`,
-AOF rewrite/fsync cadence).
 
 ---
 
@@ -180,7 +239,7 @@ AOF rewrite/fsync cadence).
 Save your tweaks as `redis_optimized.conf`, then run the same benchmark:
 
 ```bash
-REDIS_CONF=$HOME/redis_optimized.conf ./workload_runner_redis.sh \
+REDIS_CONF=$HOME/pcbench/redis/configs/redis_optimized.conf ./workload_runner_redis.sh \
   2>&1 | tee ~/redis_optimized_benchmark.log
 ```
 
