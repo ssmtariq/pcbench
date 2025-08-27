@@ -28,7 +28,7 @@ REDIS_CLI=${REDIS_CLI:-$(command -v redis-cli || true)}
 YCSB_DIR=${YCSB_DIR:-$HOME/YCSB}
 YCSB_BIN=${YCSB_BIN:-$YCSB_DIR/bin/ycsb.sh}
 
-REDIS_CONF=${REDIS_CONF:-$HOME/TUNA_best_redis_config.conf}
+REDIS_CONF=${REDIS_CONF:-$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf}
 REDIS_PORT=${REDIS_PORT:-6379}
 REDIS_HOST=${REDIS_HOST:-127.0.0.1}
 

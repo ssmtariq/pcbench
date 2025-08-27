@@ -58,7 +58,20 @@ redis-server --version
 
 ---
 
-## 2. Install YCSB workload generator
+## 2. Select the **best TUNA Redis config** from `src/results_redis/full_seed1.csv`
+
+```bash
+cd ~
+python3 pcbench/redis/best_redisconfig_finder.py
+
+# The script writes the following files to home directory as:
+#  - TUNA_best_redis_config.json  (machine-readable)
+#  - TUNA_best_redis_config.conf  (redis.conf-style, ready to run)
+```
+
+---
+
+## 3. Install YCSB workload generator
 
 TUNA’s Redis experiments rely on the Yahoo Cloud Serving Benchmark (YCSB)
 to generate load. YCSB is a Java‑based tool that supports many databases 
@@ -70,14 +83,14 @@ workload properties such as recordcount 1.8 million,
 operationcount 2 billion and threadcount 40.
 
 Follow these steps to build and install YCSB:
-### 2A. Install Java and Maven. 
+### 3A. Install Java and Maven. 
 YCSB requires a recent JDK and Maven 3 to build from source
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y openjdk-11-jdk maven git
 ```
-### 2B. Clone and build YCSB. 
+### 3B. Clone and build YCSB. 
 Clone the upstream repository and compile
 only the Redis binding. The YCSB README notes that building the full
 distribution uses `mvn clean package`, while a single binding can
@@ -95,7 +108,7 @@ available under your `~/YCSB` directory. All workload templates are
 located under `~/YCSB/workloads`. It’s convenient to export
 `YCSB_DIR=~/YCSB` so the benchmarking scripts can find it.
 
-### 2C. (Optional) Use a pre‑built release. 
+### 3C. (Optional) Use a pre‑built release. 
 If you prefer not to build from source, the YCSB project publishes tarball releases. 
 Downloading and unpacking a release follows the example in the YCSB README
 
@@ -126,19 +139,6 @@ $YCSB_DIR/bin/ycsb.sh run redis \
 redis-cli shutdown nosave 2>/dev/null || true
 ```
 With YCSB built or unpacked, you’re ready to run the benchmarks.
-
----
-
-## 3. Select the **best TUNA Redis config** from `src/results_redis/full_seed1.csv`
-
-```bash
-cd ~
-python3 pcbench/redis/best_redisconfig_finder.py
-
-# The script writes the following files to home directory as:
-#  - TUNA_best_redis_config.json  (machine-readable)
-#  - TUNA_best_redis_config.conf  (redis.conf-style, ready to run)
-```
 
 ---
 
