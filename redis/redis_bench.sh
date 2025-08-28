@@ -4,7 +4,7 @@
 #
 # Usage pattern mirrors nginx_bench.sh via environment variables:
 #   REDIS_CONF=... WARMUP_SECONDS=... ITERATIONS=... DURATION=... THREADS=... \
-#   bash workload_runner_redis.sh
+#   bash redis_bench.sh
 #
 # Optional YCSB/Redis knobs:
 #   RECORDCOUNT (default 1800000)

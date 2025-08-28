@@ -170,15 +170,6 @@ hpcrun -o "$HPCRUN_OUT" \
 ### 4B. In another terminal, **drive the workload** while `hpcrun` is active:
 
 ```bash
-$YCSB_DIR/bin/ycsb.sh run redis \
-  -s -P $YCSB_DIR/workloads/workloada \
-  -p recordcount=1800000 \
-  -p operationcount=2000000000 \
-  -p threadcount=10 \
-  -p maxexecutiontime=60 \
-  -p redis.host=127.0.0.1 \
-  -p redis.port=6379
-
 START_SERVER=0 STOP_SERVER=0 SKIP_LOAD=1 \
 REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
 RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
@@ -233,11 +224,12 @@ Use the Redis benchmarking runner (warmup + N runs + summary):
 ```bash
 chmod +x redis_bench.sh
 
+RESULTS_FILE=$HOME/redis_bench_results.log \
 REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
 RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 \
 bash $HOME/pcbench/redis/redis_bench.sh \
-  2>&1 | tee ~/redis_bench_results.log
+  2>&1 | tee -a $HOME/redis_bench_console.log
 ```
 
 This script:
@@ -256,11 +248,12 @@ This script:
 Save your tweaks as `redis_optimized.conf`, then run the same benchmark:
 
 ```bash
+RESULTS_FILE=$HOME/redis_bench_results.log \
 REDIS_CONF=$HOME/pcbench/redis/configs/redis_optimized.conf \
 RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 \
 bash $HOME/pcbench/redis/redis_bench.sh \
-  2>&1 | tee ~/redis_bench_results.log
+  2>&1 | tee -a $HOME/redis_bench_console.log
 ```
 
 Compare median ops/sec and variance to the ORIGINAL run.
