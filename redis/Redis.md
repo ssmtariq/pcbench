@@ -224,6 +224,9 @@ Use the Redis benchmarking runner (warmup + N runs + summary):
 ```bash
 chmod +x redis_bench.sh
 
+# Remove any pre-loaded data (consider running redis from home directory)
+rm $HOME/dump.rdb
+
 RESULTS_FILE=$HOME/redis_bench_results.log \
 REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
 RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
@@ -248,6 +251,16 @@ This script:
 Save your tweaks as `redis_optimized.conf`, then run the same benchmark:
 
 ```bash
+# Remove any pre-loaded data (consider running redis from home directory)
+rm $HOME/dump.rdb
+
+# Smoke test of optimized config
+REDIS_CONF=$HOME/pcbench/redis/configs/redis_optimized.conf \
+RECORDCOUNT=100000 OPERATIONCOUNT=2000000000 \
+WARMUP_SECONDS=0 ITERATIONS=1 DURATION=30 THREADS=10 \
+bash $HOME/pcbench/redis/redis_bench.sh
+
+# Run validated optimized config
 RESULTS_FILE=$HOME/redis_bench_results.log \
 REDIS_CONF=$HOME/pcbench/redis/configs/redis_optimized.conf \
 RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \

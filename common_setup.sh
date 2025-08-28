@@ -14,6 +14,13 @@ fail_report() {
 }
 trap 'fail_report "${LINENO}" "${BASH_COMMAND}"' ERR
 
+# NEW: safe, non-failing first-line capture (replaces `| head -n1` in prints)
+first_line() {
+  local out
+  out="$("$@" 2>&1 || true)"
+  printf "%s\n" "$out" | head -n1 || true
+}
+
 # For speed, avoid apt prompts
 export DEBIAN_FRONTEND=noninteractive
 
@@ -42,12 +49,12 @@ install_python() {
 # ---------- 3) Java 21 ----------
 install_java() {
   if command -v java >/dev/null 2>&1 && java -version 2>&1 | grep -q '"21\.'; then
-    ok "Java already present: $(java -version 2>&1 | head -n1)"
+    ok "Java already present: $(first_line java -version)"
     return
   fi
   log "Install OpenJDK 21"
   sudo apt install -y openjdk-21-jdk
-  ok "Installed $(java -version 2>&1 | head -n1)"
+  ok "Installed $(first_line java -version)"
 }
 
 # ---------- 4) Docker CE (+ Compose plugin) ----------
@@ -168,7 +175,7 @@ install_hpctoolkit_spack() {
     printf "\n\033[1;31m[FAIL]\033[0m HPCToolkit appears not loaded after install.\n"
     exit 1
   fi
-  ok "HPCToolkit loaded: $(hpcrun -V 2>&1 | head -n1)"
+  ok "HPCToolkit loaded: $(first_line hpcrun -V)"
 }
 
 # ---------- run all ----------
@@ -181,13 +188,13 @@ main() {
   install_miniconda
   install_hpctoolkit_spack
   ok "All steps completed"
-  printf "\n\033[1;36m[SUMMARY]\033[0m Installed versions:\n"
+  printf "\n\033[1;36m[SUMMARY]\033[0m Installed dependencies:\n"
   command -v python3.11 >/dev/null 2>&1 && python3.11 -V
-  command -v java >/dev/null 2>&1 && java -version 2>&1 | head -n1
-  command -v docker >/dev/null 2>&1 && docker --version
-  command -v docker >/dev/null 2>&1 && docker compose version 2>/dev/null || true
-  command -v fio >/dev/null 2>&1 && fio --version
-  command -v stress-ng >/dev/null 2>&1 && stress-ng --version | head -n1
-  command -v hpcrun >/dev/null 2>&1 && hpcrun -V 2>&1 | head -n1
+  command -v java       >/dev/null 2>&1 && first_line java -version
+  command -v docker     >/dev/null 2>&1 && docker --version
+  command -v docker     >/dev/null 2>&1 && docker compose version 2>/dev/null || true
+  command -v fio        >/dev/null 2>&1 && fio --version
+  command -v stress-ng  >/dev/null 2>&1 && first_line stress-ng --version
+  command -v hpcrun     >/dev/null 2>&1 && first_line hpcrun -V
 }
 main "$@"
