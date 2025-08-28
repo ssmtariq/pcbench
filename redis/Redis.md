@@ -65,6 +65,7 @@ sudo sysctl vm.overcommit_memory=1
 
 ```bash
 cd ~
+# Ensure pcbench is already present in your home directory
 python3 pcbench/redis/best_redisconfig_finder.py
 
 # The script writes the following files to home directory as:
