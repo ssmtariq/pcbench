@@ -86,6 +86,7 @@ The benchmark description bundled with TUNA (`ycsb.json`) defines
 workloada with a warm‑up of 30 s, a benchmark duration of 300 s and
 workload properties such as recordcount 1.8 million,
 operationcount 2 billion and threadcount 40.
+Note: YCSB Workload A is an update heavy workload
 
 Follow these steps to build and install YCSB:
 ### 3A. Install Java and Maven. 
@@ -113,7 +114,7 @@ Quick YCSB Sanity Check
 
 ```bash
 REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
-RECORDCOUNT=100000 OPERATIONCOUNT=0 \
+RECORDCOUNT=100000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=0 ITERATIONS=1 DURATION=30 THREADS=10 \
 bash $HOME/pcbench/redis/redis_bench.sh
 ```
@@ -149,7 +150,7 @@ redis-cli shutdown nosave 2>/dev/null || true
 
 # Preload the dataset once 
 REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
-RECORDCOUNT=1800000 OPERATIONCOUNT=0 \
+RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=0 ITERATIONS=0 DURATION=0 THREADS=10 \
 SKIP_LOAD=0 \
 bash $HOME/pcbench/redis/redis_bench.sh
@@ -157,6 +158,7 @@ bash $HOME/pcbench/redis/redis_bench.sh
 # Where to store HPCToolkit measurements
 export HPCRUN_OUT=$HOME/hpctoolkit-redis-measurements
 export HPCRUN_TMPDIR=$HPCRUN_OUT
+rm -rf "$HPCRUN_OUT" && mkdir -p "$HPCRUN_OUT"
 
 # Start redis-server under hpcrun, using the selected TUNA config
 hpcrun -o "$HPCRUN_OUT" \
@@ -179,7 +181,7 @@ $YCSB_DIR/bin/ycsb.sh run redis \
 
 START_SERVER=0 STOP_SERVER=0 SKIP_LOAD=1 \
 REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
-RECORDCOUNT=1800000 OPERATIONCOUNT=0 \
+RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=0 ITERATIONS=1 DURATION=60 THREADS=10 \
 bash $HOME/pcbench/redis/redis_bench.sh \
 2>&1 | tee ~/redis_profile_run.log
@@ -188,7 +190,7 @@ bash $HOME/pcbench/redis/redis_bench.sh \
 ### 4C. Stop the server when done:
 
 ```bash
-redis-cli shutdown nosave
+redis-cli shutdown nosave 2>/dev/null || true
 ```
 
 ### 4D. Build the performance database for **hpcviewer**:
@@ -232,7 +234,7 @@ Use the Redis benchmarking runner (warmup + N runs + summary):
 chmod +x redis_bench.sh
 
 REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
-RECORDCOUNT=1800000 OPERATIONCOUNT=0 \
+RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 \
 bash $HOME/pcbench/redis/redis_bench.sh \
   2>&1 | tee ~/redis_bench_results.log
@@ -255,7 +257,7 @@ Save your tweaks as `redis_optimized.conf`, then run the same benchmark:
 
 ```bash
 REDIS_CONF=$HOME/pcbench/redis/configs/redis_optimized.conf \
-RECORDCOUNT=1800000 OPERATIONCOUNT=0 \
+RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 \
 bash $HOME/pcbench/redis/redis_bench.sh \
   2>&1 | tee ~/redis_bench_results.log
