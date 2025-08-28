@@ -57,7 +57,8 @@ SKIP_LOAD=${SKIP_LOAD:-0}
 
 TMPDIR="$(mktemp -d)"
 THR_FILE="$TMPDIR/throughputs.txt"
-RESULTS_FILE="${RESULTS_FILE:-$HOME/redis_bench_results.log}"
+# Only append if user provides RESULTS_FILE; otherwise, just print to console
+RESULTS_FILE="${RESULTS_FILE:-}"
 
 [[ -x "$REDIS_SERVER" ]] || fatal "redis-server not found; set REDIS_SERVER=/path/to/redis-server"
 [[ -x "$YCSB_BIN" ]]     || fatal "YCSB launcher not found; set YCSB_DIR to your YCSB installation"
@@ -143,6 +144,12 @@ done
 
 stop_redis
 
+# Handle ITERATIONS=0 / no measurements case gracefully
+if [[ ! -s "$THR_FILE" ]]; then
+  log "No measured iterations; skipping stats."
+  exit 0
+fi
+
 log "Results"
 nl -ba "$THR_FILE"
 
@@ -173,13 +180,15 @@ echo   "All logs & intermediate files are in $TMPDIR"
 timestamp=$(date '+%A, %d %B %Y %T')
 run_list=$(paste -sd, "$THR_FILE" | sed 's/,/, /g')
 
-{
-  echo '---'
-  echo "$timestamp"
-  echo "Runs  : $run_list"
-  echo "Mean  : $mean"
-  echo "Median: $median"
-  echo "StdDev: $stdev"
-} >> "$RESULTS_FILE"
-
-log "Appended summary to $RESULTS_FILE"
+# Append only if RESULTS_FILE is provided by the user
+if [[ -n "$RESULTS_FILE" ]]; then
+  {
+    echo '---'
+    echo "$timestamp"
+    echo "Runs  : $run_list"
+    echo "Mean  : $mean"
+    echo "Median: $median"
+    echo "StdDev: $stdev"
+  } >> "$RESULTS_FILE"
+  log "Appended summary to $RESULTS_FILE"
+fi

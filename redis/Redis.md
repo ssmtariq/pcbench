@@ -66,6 +66,7 @@ sudo sysctl vm.overcommit_memory=1
 ```bash
 cd ~
 # Ensure pcbench is already present in your home directory
+pip install pandas
 python3 pcbench/redis/best_redisconfig_finder.py
 
 # The script writes the following files to home directory as:
@@ -94,25 +95,8 @@ YCSB requires a recent JDK and Maven 3 to build from source
 sudo apt-get update
 sudo apt-get install -y openjdk-11-jdk maven git
 ```
-### 3B. Clone and build YCSB. 
-Clone the upstream repository and compile
-only the Redis binding. The YCSB README notes that building the full
-distribution uses `mvn clean package`, while a single binding can
-be compiled with the `-pl` option
 
-```bash
-cd ~
-git clone https://github.com/brianfrankcooper/YCSB.git
-cd YCSB
-# Build only the Redis binding to reduce dependencies
-mvn -pl site.ycsb:redis-binding -am clean package
-```
-When the build completes, the launcher script `bin/ycsb.sh` will be
-available under your `~/YCSB` directory. All workload templates are
-located under `~/YCSB/workloads`. It’s convenient to export
-`YCSB_DIR=~/YCSB` so the benchmarking scripts can find it.
-
-### 3C. (Optional) Use a pre‑built release. 
+### 3B. Use a pre‑built release. 
 If you prefer not to build from source, the YCSB project publishes tarball releases. 
 Downloading and unpacking a release follows the example in the YCSB README
 
@@ -131,10 +115,27 @@ Quick YCSB Sanity Check
 REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
 RECORDCOUNT=100000 OPERATIONCOUNT=0 \
 WARMUP_SECONDS=0 ITERATIONS=1 DURATION=30 THREADS=10 \
-bash $HOME/pcbench/redis/redis_bench.sh \
-  2>&1 | tee ~/redis_sanity_benchmark.log
+bash $HOME/pcbench/redis/redis_bench.sh
 ```
 With YCSB built or unpacked, you’re ready to run the benchmarks.
+
+### 3C. (Optional) Clone and build YCSB. 
+Clone the upstream repository and compile
+only the Redis binding. The YCSB README notes that building the full
+distribution uses `mvn clean package`, while a single binding can
+be compiled with the `-pl` option
+
+```bash
+cd ~
+git clone https://github.com/brianfrankcooper/YCSB.git
+cd YCSB
+# Build only the Redis binding to reduce dependencies
+mvn -pl site.ycsb:redis-binding -am clean package
+```
+When the build completes, the launcher script `bin/ycsb.sh` will be
+available under your `~/YCSB` directory. All workload templates are
+located under `~/YCSB/workloads`. It’s convenient to export
+`YCSB_DIR=~/YCSB` so the benchmarking scripts can find it.
 
 ---
 
@@ -145,6 +146,13 @@ With YCSB built or unpacked, you’re ready to run the benchmarks.
 ```bash
 # Stop any running instance
 redis-cli shutdown nosave 2>/dev/null || true
+
+# Preload the dataset once 
+REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
+RECORDCOUNT=1800000 OPERATIONCOUNT=0 \
+WARMUP_SECONDS=0 ITERATIONS=0 DURATION=0 THREADS=10 \
+SKIP_LOAD=0 \
+bash $HOME/pcbench/redis/redis_bench.sh
 
 # Where to store HPCToolkit measurements
 export HPCRUN_OUT=$HOME/hpctoolkit-redis-measurements
@@ -168,6 +176,13 @@ $YCSB_DIR/bin/ycsb.sh run redis \
   -p maxexecutiontime=60 \
   -p redis.host=127.0.0.1 \
   -p redis.port=6379
+
+START_SERVER=0 STOP_SERVER=0 SKIP_LOAD=1 \
+REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
+RECORDCOUNT=1800000 OPERATIONCOUNT=0 \
+WARMUP_SECONDS=0 ITERATIONS=1 DURATION=60 THREADS=10 \
+bash $HOME/pcbench/redis/redis_bench.sh \
+2>&1 | tee ~/redis_profile_run.log
 ```
 
 ### 4C. Stop the server when done:
@@ -240,7 +255,7 @@ Save your tweaks as `redis_optimized.conf`, then run the same benchmark:
 
 ```bash
 REDIS_CONF=$HOME/pcbench/redis/configs/redis_optimized.conf \
-RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
+RECORDCOUNT=1800000 OPERATIONCOUNT=0 \
 WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 \
 bash $HOME/pcbench/redis/redis_bench.sh \
   2>&1 | tee ~/redis_bench_results.log
