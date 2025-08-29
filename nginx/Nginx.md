@@ -71,7 +71,7 @@ count, performance and source file.
 ## 3. Convert JSON config file into an nginx configuration
 
 The JSON file `TUNA_best_nginx_config.json` contains key--value pairs for nginx's tunable knobs.
-We need to create a new configuration file (e.g. `~/nginx/conf/nginx_best.conf`)
+We need to create a new configuration file (e.g. `~/nginx/conf/original.conf`)
 starting from the default `nginx.conf`. Inside the `http` block add one
 directive per key from the JSON. For example, a JSON entry
 ```bash
@@ -99,7 +99,7 @@ sh $HOME/pcbench/nginx/configbuilder.sh
 ```
 Then test the syntax:
 ```bash
-nginx -t -c ~/nginx/conf/nginx_best.conf
+nginx -t -c ~/nginx/conf/original.conf
 ```
 
 ## 4. Benchmark the selected configuration
@@ -117,7 +117,7 @@ concurrent connections. It starts nginx with your config, drives traffic
 using wrk, parses the `Requests/sec` value and finally computes
 mean/median throughput and standard deviation. Example:
 ```bash
-NGINX_CONF=$HOME/nginx/conf/nginx_best.conf \
+NGINX_CONF=$HOME/nginx/conf/original.conf \
 WARMUP_SECONDS=0 ITERATIONS=1 DURATION=30 THREADS=10 CONNECTIONS=10 \
 bash $HOME/pcbench/nginx/nginx_bench.sh
 ```
@@ -146,7 +146,7 @@ rm -rf "$HPCRUN_OUT" && mkdir -p "$HPCRUN_OUT"
 # load hpctoolkit in the terminal
 spack load hpctoolkit
 export NGINX_BIN="$HOME/nginx/sbin/nginx"
-export NGINX_CONF="$HOME/nginx/conf/nginx_best.conf"
+export NGINX_CONF="$HOME/nginx/conf/original.conf"
 
 # 3. Wrap nginx startup in hpcrun to collect cache-miss events
 hpcrun  -o "$HPCRUN_OUT" \
@@ -198,21 +198,21 @@ instance, high miss rates in the upstream proxy module might hint that
 `sendfile` should be enabled or that `open_file_cache` needs adjusting.
 Present the exported images to ChatGPT and ask for suggestions on which
 nginx knobs could improve cache locality. Apply the recommended changes
-to a new configuration file (e.g. `nginx_optimized.conf`).
+to a new configuration file (e.g. `optimized.conf`).
 
 ## 7. Re‑evaluate the orignal and optimized configuration
 
 Repeat the benchmarking step with your optimized configuration:
 ```bash
 #Run original config
-NGINX_CONF=$HOME/nginx/conf/nginx_best.conf \
+NGINX_CONF=$HOME/nginx/conf/original.conf \
 WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 CONNECTIONS=10 \
 bash $HOME/pcbench/nginx/nginx_bench.sh
 
 #Test optimized config
-nginx -t -c ~/nginx/conf/nginx_optimized.conf
+nginx -t -c ~/nginx/conf/optimized.conf
 # Run optimized config
-NGINX_CONF=$HOME/nginx/conf/nginx_optimized.conf \
+NGINX_CONF=$HOME/nginx/conf/optimized.conf \
 WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 CONNECTIONS=10 \
 bash $HOME/pcbench/nginx/nginx_bench.sh
 ```
