@@ -41,7 +41,7 @@ pg_ctl -D ~/pgdata stop;
 ### Find the best pgsql configuration from TUNA samples
 ```bash
 pip install pandas
-python pcbench/best_pg_cfg.py
+python pcbench/best_postgresql_config_finder.py
 ```
 
 ### Setup pgsql to use the selected configuration

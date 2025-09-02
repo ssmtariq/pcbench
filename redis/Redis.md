@@ -67,7 +67,7 @@ sudo sysctl vm.overcommit_memory=1
 cd ~
 # Ensure pcbench is already present in your home directory
 pip install pandas
-python3 pcbench/redis/best_redisconfig_finder.py
+python3 pcbench/redis/best_redis_config_finder.py
 
 # The script writes the following files to home directory as:
 #  - TUNA_best_redis_config.json  (machine-readable)
@@ -113,7 +113,7 @@ export YCSB_DIR=~/YCSB
 Quick YCSB Sanity Check
 
 ```bash
-REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
+REDIS_CONF=$HOME/pcbench/redis/configs/original.conf \
 RECORDCOUNT=100000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=0 ITERATIONS=1 DURATION=30 THREADS=10 \
 bash $HOME/pcbench/redis/redis_bench.sh
@@ -149,7 +149,7 @@ located under `~/YCSB/workloads`. It’s convenient to export
 redis-cli shutdown nosave 2>/dev/null || true
 
 # Preload the dataset once 
-REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
+REDIS_CONF=$HOME/pcbench/redis/configs/original.conf \
 RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=0 ITERATIONS=0 DURATION=0 THREADS=10 \
 SKIP_LOAD=0 \
@@ -164,14 +164,14 @@ rm -rf "$HPCRUN_OUT" && mkdir -p "$HPCRUN_OUT"
 hpcrun -o "$HPCRUN_OUT" \
        -e PAPI_L2_TCM@1000 \
        -e PAPI_L3_TCM@1000 \
-       -- redis-server $HOME/pcbench/redis/configs/TUNA_best_redis_config.conf --port 6379 --protected-mode no
+       -- redis-server $HOME/pcbench/redis/configs/original.conf --port 6379 --protected-mode no
 ```
 
 ### 4B. In another terminal, **drive the workload** while `hpcrun` is active:
 
 ```bash
 START_SERVER=0 STOP_SERVER=0 SKIP_LOAD=1 \
-REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
+REDIS_CONF=$HOME/pcbench/redis/configs/original.conf \
 RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=0 ITERATIONS=1 DURATION=60 THREADS=10 \
 bash $HOME/pcbench/redis/redis_bench.sh \
@@ -228,7 +228,7 @@ chmod +x redis_bench.sh
 rm $HOME/dump.rdb
 
 RESULTS_FILE=$HOME/redis_bench_results.log \
-REDIS_CONF=$HOME/pcbench/redis/configs/TUNA_best_redis_config.conf \
+REDIS_CONF=$HOME/pcbench/redis/configs/original.conf \
 RECORDCOUNT=1800000 OPERATIONCOUNT=2000000000 \
 WARMUP_SECONDS=30 ITERATIONS=10 DURATION=120 THREADS=10 \
 bash $HOME/pcbench/redis/redis_bench.sh \
@@ -237,7 +237,7 @@ bash $HOME/pcbench/redis/redis_bench.sh \
 
 This script:
 
-* starts `redis-server` with `TUNA_best_redis_config.conf`,
+* starts `redis-server` with `original.conf`,
 * loads the initial YCSB dataset (recordcount ≈ 1.8 M) into Redis using `ycsb load redis`,
 * runs a short warm‑up using YCSB (default 30 s),
 * runs **N iterations** of a timed YCSB workload (default 300 s),
