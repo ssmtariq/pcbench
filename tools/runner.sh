@@ -34,14 +34,14 @@ step "4. Classify memory-boundedness"
 
 if [ -f "$ARTI_ROOT/memory_confirmed.flag" ] || [ "${FORCE_PROFILE:-0}" = "1" ]; then
   step "5. HPCToolkit profile"
-  "$dir/5_hpct_profile.sh"
+  "$dir/5_profiler.sh"
   step "6. Collect augmentation bundle"
   "$dir/6_collect_aug.sh"
 else
   echo "[!] Skipping 40/50 because memory not confirmed (set FORCE_PROFILE=1 to force)."
 fi
 
-echo -e "\n(Optionally) put optimized CONF_PATH and run 7_validate.sh to append oracle.\n"
+echo -e "\n(Optionally) put optimized CONF_PATH and run 7_validator.sh to append oracle.\n"
 
 step "8. Status"
 "$dir/8_print_status.sh"
