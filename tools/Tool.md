@@ -75,17 +75,17 @@ bash $HOME/pcbench/tools/2_perf_events.sh
 
 ```bash
 # PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script)
-SUT=postgres WORKLOADS=all ITER=3 WARMUP_SECONDS=30 DURATION=180 THREADCOUNT=12 \
+SUT=postgres WORKLOADS=all ITER=1 WARMUP_SECONDS=0 DURATION=60 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/postgresql/configs/original.conf \
 bash $HOME/pcbench/tools/3_run_workload.sh
 
 # nginx
-SUT=nginx WORKLOADS=all ITER=3 CONCURRENCY=500 DURATION=60 THREADCOUNT=12 \
+SUT=nginx ITER=1 CONCURRENCY=10 DURATION=60 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/nginx/configs/original.conf \
 bash $HOME/pcbench/tools/3_run_workload.sh
 
 # redis
-SUT=redis WORKLOADS=all ITER=3 DURATION=30 THREADCOUNT=40 \
+SUT=redis ITER=1 DURATION=60 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/redis/configs/original.conf \
 bash $HOME/pcbench/tools/3_run_workload.sh
 ```
@@ -132,17 +132,17 @@ bash $HOME/pcbench/tools/6_collect_aug.sh
 
 ```bash
 # PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script)
-SUT=postgres WORKLOADS=all ITER=3 WARMUP_SECONDS=30 DURATION=180 THREADCOUNT=12 \
+SUT=postgres WORKLOADS=all ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/postgresql/configs/optimized.conf \
 bash $HOME/pcbench/tools/7_validator.sh
 
 # nginx
-SUT=nginx WORKLOADS=all ITER=3 CONCURRENCY=500 DURATION=60 THREADCOUNT=12 \
+SUT=nginx ITER=1 WARMUP_SECONDS=30 CONCURRENCY=10 DURATION=120 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/nginx/configs/optimized.conf \
 bash $HOME/pcbench/tools/7_validator.sh
 
 # redis
-SUT=redis WORKLOADS=all ITER=3 DURATION=30 THREADCOUNT=40 \
+SUT=redis ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/redis/configs/optimized.conf \
 bash $HOME/pcbench/tools/7_validator.sh
 
@@ -167,17 +167,17 @@ bash $HOME/pcbench/tools/8_summarizer.sh
 
 ```bash
 # PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script)
-SUT=postgres WORKLOADS=all ITER=3 WARMUP_SECONDS=30 DURATION=180 THREADCOUNT=12 \
+SUT=postgres WORKLOADS=all ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/postgresql/configs/optimized.conf \
 bash $HOME/pcbench/tools/runner.sh
 
 # nginx
-SUT=nginx WORKLOADS=all ITER=3 CONCURRENCY=500 DURATION=60 THREADCOUNT=12 \
+SUT=nginx ITER=1 WARMUP_SECONDS=30 CONCURRENCY=10 DURATION=120 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/nginx/configs/optimized.conf \
 bash $HOME/pcbench/tools/runner.sh
 
 # redis
-SUT=redis WORKLOADS=all ITER=3 DURATION=30 THREADCOUNT=40 \
+SUT=redis ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/redis/configs/optimized.conf \
 bash $HOME/pcbench/tools/runner.sh
 ```
