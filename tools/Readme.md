@@ -26,7 +26,7 @@ Here’s a single, fault-tolerant, orchestration script that:
 * **Common knobs (all scripts accept):**
 
   * `SUT=postgresql|nginx|redis`
-  * `WORKLOADS=small|medium|large|all`
+  * `WORKLOADS=small|large`
   * `ITER=3`
   * `CONF_PATH=/path/to/config` (optional)
   * `THREADS=$(nproc)`
@@ -74,7 +74,7 @@ bash $HOME/pcbench/tools/2_perf_events.sh
 * **Parameters:**
 
   * `SUT=postgresql|nginx|redis` (default: `postgresql`)
-  * `WORKLOADS=small|medium|large|all` (default: `small`)
+  * `WORKLOADS=small|large` (default: `small`)
   * `ITER=3`
   * `CONF_PATH` (optional: SUT config file)
   * `BENCH_CFG` (optional: Postgres BenchBase XML)
@@ -86,7 +86,7 @@ bash $HOME/pcbench/tools/2_perf_events.sh
 ```bash
 # PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script) 
 # WARMUP_SECONDS should be either 0 or 1 only for postgresql
-SUT=postgresql WORKLOADS=all ITER=1 WARMUP_SECONDS=0 DURATION=60 THREADCOUNT=10 \
+SUT=postgresql WORKLOADS=small ITER=1 WARMUP_SECONDS=0 DURATION=60 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/postgresql/configs/original.conf \
 bash $HOME/pcbench/tools/3_run_workload.sh
 
@@ -143,7 +143,7 @@ bash $HOME/pcbench/tools/6_collect_aug.sh
 
 ```bash
 # PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script)
-SUT=postgresql WORKLOADS=all ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
+SUT=postgresql WORKLOADS=large ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/postgresql/configs/optimized.conf \
 bash $HOME/pcbench/tools/7_validator.sh
 
@@ -178,7 +178,7 @@ bash $HOME/pcbench/tools/8_summarizer.sh
 
 ```bash
 # PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script)
-SUT=postgresql WORKLOADS=all ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
+SUT=postgresql WORKLOADS=small ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/postgresql/configs/original.conf \
 bash $HOME/pcbench/tools/runner.sh
 

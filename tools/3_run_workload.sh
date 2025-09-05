@@ -11,7 +11,7 @@ die(){ echo -e "[$(date +%T)] ❌ $*" >&2; exit 1; }
 
 # ---------- CLI/env knobs (common) ----------
 SUT="${SUT:-postgresql}"                        # postgresql | nginx | redis
-WORKLOADS="${WORKLOADS:-all}"                   # accepted for CLI parity; per-SUT scripts may ignore
+WORKLOADS="${WORKLOADS:-small}"                   # accepted for CLI parity; per-SUT scripts may ignore
 ITER="${ITER:-3}"
 WARMUP_SECONDS="${WARMUP_SECONDS:-30}"
 DURATION="${DURATION:-180}"
