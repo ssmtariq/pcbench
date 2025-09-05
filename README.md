@@ -29,7 +29,7 @@ sudo sh -c 'echo -1 > /proc/sys/kernel/perf_event_paranoid'
 **The rest of the setup from Step-1 until Step-3 can be automated by running the script `common_setup.sh` as below:**
 
 ```bash
-bash common_setup.sh
+bash $HOME/pcbench/common_setup.sh
 ```
 
 Without this, Linux restricts access to raw cache-miss events.
