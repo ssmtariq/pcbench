@@ -45,11 +45,11 @@ PGDATA="$HOME/pgdata"
 
 # -------- defaults (updated per request) ------------------------------------
 # Default behavior: NO warmup + SMALL load + 1 iteration
-WARMUP="${WARMUP:-0}"                  # 0 = no warmup (default), 1 = do a small warmup run each iteration
+WARMUP="${WARMUP:-0}"
+WORKLOAD="${WORKLOAD:-small}"
 case "$WORKLOAD" in small|large|xl) ;; *)
-  fatal "Invalid WORKLOAD='$WORKLOAD' (expected: small|large|xl)";;
-esac
-WORKLOAD="${WORKLOAD:-small}"          # "small" (default) or "large" or "xl"
+  fatal "Invalid WORKLOAD='$WORKLOAD' (expected: small|large|xl)"
+esac          # "small" (default) or "large" or "xl"
 ITERATIONS="${ITERATIONS:-1}"          # default single run
 SAMPLE_INTERVAL="${SAMPLE_INTERVAL:-5}"
 

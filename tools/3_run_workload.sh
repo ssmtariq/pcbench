@@ -116,13 +116,11 @@ run_postgres(){
   local pids
   pids="$(pgrep -x postgres | tr '\n' ',' | sed 's/,$//')"
 
-  # NEW: map wrapper knobs -> pgsql_bench.sh env
-  export ITERATIONS="${ITER:-1}"
-  if [[ -z "${WARMUP:-}" ]]; then
-    # Enable warmup only if user asked via seconds > 0
-    if (( ${WARMUP_SECONDS:-0} > 0 )); then export WARMUP=1; else export WARMUP=0; fi
+  # Map outer WORKLOADS (small|large|xl) to the PG runner's WORKLOAD
+  if [[ -n "${WORKLOADS:-}" ]]; then
+    case "$WORKLOADS" in small|large|xl) export WORKLOAD="$WORKLOADS" ;; esac
   fi
-  # Optional: let user override workload size specifically for Postgres
+  # Still allow explicit POSTGRES_WORKLOAD to override everything
   if [[ -n "${POSTGRES_WORKLOAD:-}" ]]; then export WORKLOAD="$POSTGRES_WORKLOAD"; fi
   # Optional: pass through sample interval if provided
   [[ -n "${SAMPLE_INTERVAL:-}" ]] && export SAMPLE_INTERVAL

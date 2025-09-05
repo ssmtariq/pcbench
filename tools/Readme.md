@@ -26,7 +26,7 @@ Here’s a single, fault-tolerant, orchestration script that:
 * **Common knobs (all scripts accept):**
 
   * `SUT=postgresql|nginx|redis`
-  * `WORKLOADS=small|large`
+  * `WORKLOADS=small|large|xl`
   * `ITER=3`
   * `CONF_PATH=/path/to/config` (optional)
   * `THREADS=$(nproc)`
@@ -74,7 +74,7 @@ bash $HOME/pcbench/tools/2_perf_events.sh
 * **Parameters:**
 
   * `SUT=postgresql|nginx|redis` (default: `postgresql`)
-  * `WORKLOADS=small|large` (default: `small`)
+  * `WORKLOADS=small|large|xl` (default: `small`)
   * `ITER=3`
   * `CONF_PATH` (optional: SUT config file)
   * `BENCH_CFG` (optional: Postgres BenchBase XML)
