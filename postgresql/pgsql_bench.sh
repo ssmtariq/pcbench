@@ -16,6 +16,10 @@ trap 'fatal "Command \"${BASH_COMMAND}\" failed (line ${LINENO})"' ERR
 WORKLOAD_DIR="$HOME/pcbench/postgresql/workload"
 DEST_DIR="$HOME/benchbase/target/benchbase-postgres/config/postgres"
 
+# Ensure BenchBase's expected config symlink exists (for config/plugin.xml)
+CONFIG_ROOT="$HOME/benchbase/target/benchbase-postgres/config"
+[[ -e "$HOME/config" ]] || ln -s "$CONFIG_ROOT" "$HOME/config"
+
 # Ensure BenchBase config dir exists and copy XMLs as requested
 mkdir -p "$DEST_DIR"
 cp -f "$WORKLOAD_DIR/xl170_tpcc_small.xml" "$DEST_DIR/xl170_tpcc_small.xml"
