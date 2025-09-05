@@ -116,6 +116,17 @@ run_postgres(){
   local pids
   pids="$(pgrep -x postgres | tr '\n' ',' | sed 's/,$//')"
 
+  # NEW: map wrapper knobs -> pgsql_bench.sh env
+  export ITERATIONS="${ITER:-1}"
+  if [[ -z "${WARMUP:-}" ]]; then
+    # Enable warmup only if user asked via seconds > 0
+    if (( ${WARMUP_SECONDS:-0} > 0 )); then export WARMUP=1; else export WARMUP=0; fi
+  fi
+  # Optional: let user override workload size specifically for Postgres
+  if [[ -n "${POSTGRES_WORKLOAD:-}" ]]; then export WORKLOAD="$POSTGRES_WORKLOAD"; fi
+  # Optional: pass through sample interval if provided
+  [[ -n "${SAMPLE_INTERVAL:-}" ]] && export SAMPLE_INTERVAL
+
   local label="pg_${TS}"
   if [ "$MEASURE_TARGET" = "server" ] && [ -n "$pids" ]; then
     log "Postgres: attaching perf to server PIDs: $pids (duration=${DURATION}s); running pgsql_bench.sh"

@@ -84,7 +84,8 @@ bash $HOME/pcbench/tools/2_perf_events.sh
   * `CONCURRENCY` (for nginx ab)
 
 ```bash
-# PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script)
+# PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script) 
+# WARMUP_SECONDS should be either 0 or 1 only for postgresql
 SUT=postgresql WORKLOADS=all ITER=1 WARMUP_SECONDS=0 DURATION=60 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/postgresql/configs/original.conf \
 bash $HOME/pcbench/tools/3_run_workload.sh
