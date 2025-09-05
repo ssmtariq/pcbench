@@ -18,6 +18,7 @@ DURATION="${DURATION:-180}"
 THREADCOUNT="${THREADCOUNT:-12}"
 CONCURRENCY="${CONCURRENCY:-500}"               # nginx (mapped to CONNECTIONS)
 CONFIG_FILE="${CONFIG_FILE:-}"                  # defaulted per SUT below
+MEASURE_TARGET="${MEASURE_TARGET:-server}"      # server | client | system
 
 # ---------- paths & logs ----------
 REPO_ROOT="${REPO_ROOT:-$HOME/pcbench}"
@@ -26,7 +27,7 @@ LOG_DIR="${LOG_DIR:-$ARTI_ROOT/logs}"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 mkdir -p "$LOG_DIR"
 
-# ---------- perf wrapper (kept from original runner) ----------
+# ---------- perf wrappers ----------
 perf_stat_wrap(){
   local label="$1"; shift
   local raw="$LOG_DIR/perf_${label}_raw.txt"
@@ -34,6 +35,38 @@ perf_stat_wrap(){
 
   perf stat -x, -e cycles,instructions,cache-references,cache-misses,branches,branch-misses,context-switches,major-faults \
     -- "$@" 1>/dev/null 2> "$raw" || true
+
+  python3 - "$raw" "$sum" <<'PY'
+import json,sys
+raw,out=sys.argv[1],sys.argv[2]
+m={}
+for L in open(raw):
+  p=L.strip().split(',')
+  if len(p)<3: continue
+  try: v=float(p[0])
+  except: continue
+  k=p[2].strip().replace('-','_').replace(':','_').replace(' ','_')
+  m[k]=v
+open(out,'w').write(json.dumps(m,indent=2))
+print(out)
+PY
+}
+
+# NEW: attach perf to server PIDs for a fixed window while running the client
+perf_stat_attach_pids_during(){
+  local label="$1"; shift
+  local pids_csv="$1"; shift
+  local raw="$LOG_DIR/perf_${label}_raw.txt"
+  local sum="$LOG_DIR/perf_${label}_summary.json"
+
+  # Start perf attached to PIDs for DURATION seconds, then run the client concurrently
+  ( perf stat -x, -p "$pids_csv" \
+      -e cycles,instructions,cache-references,cache-misses,branches,branch-misses,context-switches,major-faults \
+      -- sleep "${DURATION}" ) 1>/dev/null 2> "$raw" & PERF_PID=$!
+
+  # Run client workload (benchmark runner) while perf is active
+  "$@" || true
+  wait "$PERF_PID" || true
 
   python3 - "$raw" "$sum" <<'PY'
 import json,sys
@@ -66,22 +99,31 @@ apply_pg_conf(){
 
 # ---------- per-SUT invocations ----------
 run_postgres(){
-  # Default CONFIG_FILE and script path
+  # Defaults
   local default_cfg="$REPO_ROOT/postgresql/configs/original.conf"
   CONFIG_FILE="${CONFIG_FILE:-$default_cfg}"
   ensure_file "$CONFIG_FILE"
   local runner="$REPO_ROOT/postgresql/pgsql_bench.sh"
   ensure_file "$runner"
 
-  # Apply config, then run the existing PG runner (it manages warmup+measured runs internally)
   log "Postgres: applying config: $CONFIG_FILE"
   apply_pg_conf
 
-  # pgsql_bench.sh currently sets its own ITERATIONS/time; our ITER/WARMUP/DURATION are not used by it
-  # We still wrap it in perf to produce perf_*_summary.json like the original runner did.
+  # Ensure server is up (so we can attach to its PIDs)
+  pg_ctl -D "${PGDATA:-$HOME/pgdata}" -l "$LOG_DIR/pg.log" status >/dev/null 2>&1 || \
+    pg_ctl -D "${PGDATA:-$HOME/pgdata}" -l "$LOG_DIR/pg.log" start
+
+  local pids
+  pids="$(pgrep -x postgres | tr '\n' ',' | sed 's/,$//')"
+
   local label="pg_${TS}"
-  log "Postgres: starting pgsql_bench.sh (perf label: $label)"
-  perf_stat_wrap "$label" bash "$runner"
+  if [ "$MEASURE_TARGET" = "server" ] && [ -n "$pids" ]; then
+    log "Postgres: attaching perf to server PIDs: $pids (duration=${DURATION}s); running pgsql_bench.sh"
+    perf_stat_attach_pids_during "$label" "$pids" bash "$runner"
+  else
+    log "Postgres: MEASURE_TARGET=$MEASURE_TARGET or no PIDs → wrapping client runner"
+    perf_stat_wrap "$label" bash "$runner"
+  fi
 }
 
 run_nginx(){
@@ -99,12 +141,25 @@ run_nginx(){
   export DURATION="$DURATION"
   export THREADS="${THREADCOUNT}"
   export CONNECTIONS="${CONCURRENCY}"
+  export WRK_BIN="${WRK_BIN:-$HOME/wrk/wrk}"
 
-  # Optional: default wrk path if user built it per Nginx.md
-  export WRK_BIN="${WRK_BIN:-$HOME/wrk/wrk}"   # Nginx.md instructions
+  # Ensure nginx is up so we can attach to it (bench script may also manage it)
+  sudo systemctl is-active nginx >/dev/null 2>&1 || sudo systemctl start nginx || true
+  sleep 1
+  # Collect master + worker PIDs
+  local master=""
+  [ -f /run/nginx.pid ] && master="$(cat /run/nginx.pid 2>/dev/null || true)"
+  local workers="$(pgrep -f 'nginx: worker process' | tr '\n' ',' | sed 's/,$//')"
+  local pids_csv="$master${workers:+,$workers}"
+
   local label="nginx_${TS}"
-  log "nginx: NGINX_CONF=$NGINX_CONF ITERATIONS=$ITER WARMUP_SECONDS=$WARMUP_SECONDS DURATION=$DURATION THREADS=$THREADS CONNECTIONS=$CONNECTIONS"
-  perf_stat_wrap "$label" bash "$runner"
+  if [ "$MEASURE_TARGET" = "server" ] && [ -n "$pids_csv" ]; then
+    log "nginx: attaching perf to server PIDs: $pids_csv (duration=${DURATION}s); running nginx_bench.sh"
+    perf_stat_attach_pids_during "$label" "$pids_csv" bash "$runner"
+  else
+    log "nginx: MEASURE_TARGET=$MEASURE_TARGET or no PIDs → wrapping client runner"
+    perf_stat_wrap "$label" bash "$runner"
+  fi
 }
 
 run_redis(){
@@ -121,11 +176,20 @@ run_redis(){
   export WARMUP_SECONDS="$WARMUP_SECONDS"
   export DURATION="$DURATION"
   export THREADS="${THREADCOUNT}"
-  # redis_bench.sh already maps DURATION→MEASURE_TIME, THREADS→THREADCOUNT internally
+
+  # Ensure redis-server is up so we can attach PIDs (bench script may also manage it)
+  pgrep -x redis-server >/dev/null 2>&1 || (nohup redis-server --save "" --appendonly no >/dev/null 2>&1 & sleep 1)
+  local pids_csv
+  pids_csv="$(pgrep -x redis-server | tr '\n' ',' | sed 's/,$//')"
 
   local label="redis_${TS}"
-  log "redis: REDIS_CONF=$REDIS_CONF ITERATIONS=$ITER WARMUP_SECONDS=$WARMUP_SECONDS DURATION=$DURATION THREADS=$THREADS"
-  perf_stat_wrap "$label" bash "$runner"
+  if [ "$MEASURE_TARGET" = "server" ] && [ -n "$pids_csv" ]; then
+    log "redis: attaching perf to server PIDs: $pids_csv (duration=${DURATION}s); running redis_bench.sh"
+    perf_stat_attach_pids_during "$label" "$pids_csv" bash "$runner"
+  else
+    log "redis: MEASURE_TARGET=$MEASURE_TARGET or no PIDs → wrapping client runner"
+    perf_stat_wrap "$label" bash "$runner"
+  fi
 }
 
 # ---------- main ----------
