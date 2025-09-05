@@ -33,10 +33,12 @@ CONFIG_ROOT="$HOME/benchbase/target/benchbase-postgres/config"
 mkdir -p "$DEST_DIR"
 cp -f "$WORKLOAD_DIR/xl170_tpcc_small.xml" "$DEST_DIR/xl170_tpcc_small.xml"
 cp -f "$WORKLOAD_DIR/xl170_tpcc_large.xml" "$DEST_DIR/xl170_tpcc_large.xml"
+cp -f "$WORKLOAD_DIR/xl170_tpcc_large.xml" "$DEST_DIR/xl170_tpcc_xl.xml"
 
 WARMUP_CONFIG="$HOME/benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_small.xml"
 MEASURE_CONFIG_SMALL="$HOME/benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_small.xml"
 MEASURE_CONFIG_LARGE="$HOME/benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_large.xml"
+MEASURE_CONFIG_XL="$HOME/benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_xl.xml"
 
 BB_JAR="$HOME/benchbase/target/benchbase-postgres/benchbase.jar"
 PGDATA="$HOME/pgdata"
@@ -44,12 +46,17 @@ PGDATA="$HOME/pgdata"
 # -------- defaults (updated per request) ------------------------------------
 # Default behavior: NO warmup + SMALL load + 1 iteration
 WARMUP="${WARMUP:-0}"                  # 0 = no warmup (default), 1 = do a small warmup run each iteration
-WORKLOAD="${WORKLOAD:-small}"          # "small" (default) or "large" measured runs
+case "$WORKLOAD" in small|large|xl) ;; *)
+  fatal "Invalid WORKLOAD='$WORKLOAD' (expected: small|large|xl)";;
+esac
+WORKLOAD="${WORKLOAD:-small}"          # "small" (default) or "large" or "xl"
 ITERATIONS="${ITERATIONS:-1}"          # default single run
 SAMPLE_INTERVAL="${SAMPLE_INTERVAL:-5}"
 
 # Derived measured config based on WORKLOAD
-if [[ "$WORKLOAD" == "large" ]]; then
+if   [[ "$WORKLOAD" == "xl" ]]; then
+  MEASURE_CONFIG="$MEASURE_CONFIG_XL"
+elif [[ "$WORKLOAD" == "large" ]]; then
   MEASURE_CONFIG="$MEASURE_CONFIG_LARGE"
 else
   MEASURE_CONFIG="$MEASURE_CONFIG_SMALL"
