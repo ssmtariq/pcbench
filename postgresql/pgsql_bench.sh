@@ -12,48 +12,76 @@ fatal() { printf '\n❌  %s\n'   "$*" >&2; exit 1; }
 trap 'fatal "Command \"${BASH_COMMAND}\" failed (line ${LINENO})"' ERR
 
 # -------- paths & constants --------------------------------------------------
+# Source workloads directory (renamed from SRC_DIR per request) -> BenchBase config dir
+WORKLOAD_DIR="$HOME/pcbench/postgresql/workload"
+DEST_DIR="$HOME/benchbase/target/benchbase-postgres/config/postgres"
+
+# Ensure BenchBase config dir exists and copy XMLs as requested
+mkdir -p "$DEST_DIR"
+cp -f "$WORKLOAD_DIR/xl170_tpcc_small.xml" "$DEST_DIR/xl170_tpcc_small.xml"
+cp -f "$WORKLOAD_DIR/xl170_tpcc_large.xml" "$DEST_DIR/xl170_tpcc_large.xml"
+
 WARMUP_CONFIG="$HOME/benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_small.xml"
-MEASURE_CONFIG="$HOME/benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_large.xml"
+MEASURE_CONFIG_SMALL="$HOME/benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_small.xml"
+MEASURE_CONFIG_LARGE="$HOME/benchbase/target/benchbase-postgres/config/postgres/xl170_tpcc_large.xml"
+
 BB_JAR="$HOME/benchbase/target/benchbase-postgres/benchbase.jar"
 PGDATA="$HOME/pgdata"
 
-ITERATIONS=10
-SAMPLE_INTERVAL=5
+# -------- defaults (updated per request) ------------------------------------
+# Default behavior: NO warmup + SMALL load + 1 iteration
+WARMUP="${WARMUP:-0}"                  # 0 = no warmup (default), 1 = do a small warmup run each iteration
+WORKLOAD="${WORKLOAD:-small}"          # "small" (default) or "large" measured runs
+ITERATIONS="${ITERATIONS:-1}"          # default single run
+SAMPLE_INTERVAL="${SAMPLE_INTERVAL:-5}"
+
+# Derived measured config based on WORKLOAD
+if [[ "$WORKLOAD" == "large" ]]; then
+  MEASURE_CONFIG="$MEASURE_CONFIG_LARGE"
+else
+  MEASURE_CONFIG="$MEASURE_CONFIG_SMALL"
+fi
 
 TMPDIR="$(mktemp -d)"
 THR_FILE="$TMPDIR/throughputs.txt"
-RESULTS_FILE="$HOME/tpcc_bench_results.log"   # <-- final report file
+RESULTS_FILE="${RESULTS_FILE:-$HOME/tpcc_bench_results.log}"
 
 log "Workspace      : $TMPDIR"
+log "Warmup?        : $([[ "$WARMUP" == "1" ]] && echo yes || echo no)"
+log "Measured size  : $WORKLOAD"
 log "Warmup config  : $WARMUP_CONFIG"
 log "Measure config : $MEASURE_CONFIG"
 log "JAR            : $BB_JAR"
 
-# -------- 1. one-time load (use LARGE so dataset matches measured runs) ------
-log "Step 1/3  – one-time schema+data load (no execution)"
+# -------- 1. one-time schema+data load (match measured size) ----------------
+LOAD_CONFIG="$MEASURE_CONFIG"
+log "Step 1/3  – one-time schema+data load using: $LOAD_CONFIG"
 /usr/bin/java   -jar "$BB_JAR" \
                 -b tpcc \
-                -c "$MEASURE_CONFIG" \
+                -c "$LOAD_CONFIG" \
                 --create=true --load=true --execute=false
 
 # -------- 2. benchmark loop --------------------------------------------------
-log "Step 2/3  – starting $ITERATIONS timed runs"
+log "Step 2/3  – starting $ITERATIONS timed run(s)"
 for i in $(seq 1 "$ITERATIONS"); do
   log "Run $i/$ITERATIONS – fast restart of PostgreSQL"
   pg_ctl -D "$PGDATA" restart -m fast
   sleep 5
 
-  # ---- 2a) warmup: 30–60s using SMALL config; discard metrics --------------
-  # (xl170_tpcc_small.xml already has <time>60</time>.)
-  WLOG="$TMPDIR/warmup_${i}.log"
-  log "Run $i/$ITERATIONS – warmup execute (discarding metrics)"
-  /usr/bin/java -jar "$BB_JAR" \
-       -b tpcc \
-       -c "$WARMUP_CONFIG" \
-       --create=false --load=false --execute=true \
-       -s "$SAMPLE_INTERVAL" | tee "$WLOG" >/dev/null
+  # ---- 2a) optional warmup (SMALL) -----------------------------------------
+  if [[ "$WARMUP" == "1" ]]; then
+    WLOG="$TMPDIR/warmup_${i}.log"
+    log "Run $i/$ITERATIONS – warmup execute (SMALL; discard metrics)"
+    /usr/bin/java -jar "$BB_JAR" \
+         -b tpcc \
+         -c "$WARMUP_CONFIG" \
+         --create=false --load=false --execute=true \
+         -s "$SAMPLE_INTERVAL" | tee "$WLOG" >/dev/null
+  else
+    log "Run $i/$ITERATIONS – skipping warmup"
+  fi
 
-  # ---- 2b) measured run using LARGE config ---------------------------------
+  # ---- 2b) measured run (SMALL or LARGE per WORKLOAD) ----------------------
   LOG="$TMPDIR/run_${i}.log"
   log "Run $i/$ITERATIONS – measured execute (sampling ${SAMPLE_INTERVAL}s)"
   /usr/bin/java -jar "$BB_JAR" \
@@ -62,13 +90,10 @@ for i in $(seq 1 "$ITERATIONS"); do
        --create=false --load=false --execute=true \
        -s "$SAMPLE_INTERVAL" | tee "$LOG"
 
-  # ---- extract throughput ---------------------------------------------------
-#   tp=$(grep -oP '= \K[0-9.]+(?= requests/sec \(throughput\))' "$LOG" | tail -n1)
-tp=$(grep -oP '= \K[0-9.]+(?= requests/sec \(throughput\))' "$LOG" \
-     | awk '{n++; s+=$1} END{ if(n==0){exit 1} printf "%.6f", s/n }')
-  if [[ -z "$tp" ]]; then
-    fatal "Throughput not found in $LOG"
-  fi
+  # ---- extract throughput (mean of per-sample lines) -----------------------
+  tp=$(grep -oP '= \K[0-9.]+(?= requests/sec \(throughput\))' "$LOG" \
+       | awk '{n++; s+=$1} END{ if(n==0){exit 1} printf "%.6f", s/n }') || fatal "Throughput not found in $LOG"
+
   printf '%s\n' "$tp" >> "$THR_FILE"
   log "Run $i/$ITERATIONS – throughput = $tp TPS"
 done
@@ -93,7 +118,7 @@ read mean stdev <<<"$(awk '
   END {
     mean  = sum / n
     var   = (n > 1) ? (sumsq - sum*sum/n)/(n-1) : 0
-    printf "%.6f %.6f", mean, sqrt(var)
+    printf \"%.6f %.6f\", mean, sqrt(var)
   }
 ' "$THR_FILE")"
 
@@ -109,6 +134,8 @@ run_list=$(paste -sd, "$THR_FILE" | sed 's/,/, /g')
 {
   echo '---'
   echo "$timestamp"
+  echo "Warmup? : $([[ "$WARMUP" == "1" ]] && echo yes || echo no)"
+  echo "Size    : $WORKLOAD"
   echo "Runs  : $run_list"
   echo "Mean  : $mean"
   echo "Median: $median"
