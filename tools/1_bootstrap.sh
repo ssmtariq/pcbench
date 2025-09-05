@@ -124,9 +124,9 @@ install_postgres_and_benchbase(){
   fi
 
   # BenchBase (requires JDK 23)
-  install_temurin23
   if [ ! -f "$HOME/benchbase/target/benchbase-postgres/benchbase.jar" ]; then
     log "Installing BenchBase (postgresql profile)"
+    install_temurin23
     cd "$HOME"
     if [ ! -d "$HOME/benchbase" ]; then
       git clone --depth 1 https://github.com/cmu-db/benchbase.git
