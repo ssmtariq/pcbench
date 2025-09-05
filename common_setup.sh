@@ -39,10 +39,12 @@ install_python() {
     return
   fi
   log "Install Python 3.11 + venv + distutils + pip (via deadsnakes PPA)"
+  sudo apt-get update
+  sudo apt-get install -y --no-install-recommends software-properties-common ca-certificates gnupg
   sudo add-apt-repository ppa:deadsnakes/ppa -y
-  sudo apt update
-  sudo apt -y upgrade
-  sudo apt install -y python3.11 python3.11-venv python3.11-distutils python3-pip
+  sudo apt-get update
+  # Only install the python bits; don’t upgrade the world
+  sudo apt-get install -y python3.11 python3.11-venv python3.11-distutils python3-pip
   ok "Installed $(python3.11 -V)"
 }
 
