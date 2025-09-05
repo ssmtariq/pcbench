@@ -8,7 +8,7 @@ ARTI_ROOT="${ARTI_ROOT:-$HOME/pcbench_runs}"
 LOG_DIR="${LOG_DIR:-$ARTI_ROOT/logs}"
 HPCRUN_OUT="${HPCRUN_OUT:-$ARTI_ROOT/hpctoolkit_measurements}"
 HPC_DB="${HPC_DB:-$ARTI_ROOT/hpctoolkit_database}"
-SUT="${SUT:-postgres}"
+SUT="${SUT:-postgresql}"
 DURATION="${DURATION:-180}"
 THREADS="${THREADS:-$(nproc || echo 8)}"
 mkdir -p "$ARTI_ROOT" "$LOG_DIR"
@@ -18,7 +18,7 @@ mkdir -p "$ARTI_ROOT" "$LOG_DIR"
 rm -rf "$HPCRUN_OUT" "$HPC_DB"
 
 case "$SUT" in
-  postgres)
+  postgresql)
     pg_ctl -D "$HOME/pgdata" stop || true
     log "hpcrun wrapping Postgres start"
     hpcrun -o "$HPCRUN_OUT" \

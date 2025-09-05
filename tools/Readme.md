@@ -1,5 +1,5 @@
 Here’s a single, fault-tolerant, orchestration script that:
-  * auto-detects SuT (postgres|nginx|redis),
+  * auto-detects SuT (postgresql|nginx|redis),
   * runs one or more workloads,
   * uses perf stat to decide memory-boundedness,
   * confirms across multiple workloads,
@@ -25,7 +25,7 @@ Here’s a single, fault-tolerant, orchestration script that:
 
 * **Common knobs (all scripts accept):**
 
-  * `SUT=postgres|nginx|redis`
+  * `SUT=postgresql|nginx|redis`
   * `WORKLOADS=small|medium|large|all`
   * `ITER=3`
   * `CONF_PATH=/path/to/config` (optional)
@@ -42,7 +42,17 @@ All scripts log to `$LOG_DIR` and create machine-readable outputs (CSV/JSON) tha
 # 1) `1_bootstrap.sh` — dependencies & basic setup
 
 ```bash
-bash $HOME/pcbench/tools/1_bootstrap.sh
+# ALL SuTs (standalone):
+bash $HOME/pcbench/tools/1_bootstrap.sh all
+
+# PostgreSQL only (standalone):
+bash $HOME/pcbench/tools/1_bootstrap.sh postgresql
+
+# Nginx only (standalone):
+bash $HOME/pcbench/tools/1_bootstrap.sh nginx
+
+# Redis only (standalone):
+bash $HOME/pcbench/tools/1_bootstrap.sh redis
 ```
 
 **Verify success:** no errors, and `hpcrun -V`, `perf --version`, `jq --version` all work.
@@ -63,7 +73,7 @@ bash $HOME/pcbench/tools/2_perf_events.sh
 
 * **Parameters:**
 
-  * `SUT=postgres|nginx|redis` (default: `postgres`)
+  * `SUT=postgresql|nginx|redis` (default: `postgresql`)
   * `WORKLOADS=small|medium|large|all` (default: `small`)
   * `ITER=3`
   * `CONF_PATH` (optional: SUT config file)
@@ -75,7 +85,7 @@ bash $HOME/pcbench/tools/2_perf_events.sh
 
 ```bash
 # PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script)
-SUT=postgres WORKLOADS=all ITER=1 WARMUP_SECONDS=0 DURATION=60 THREADCOUNT=10 \
+SUT=postgresql WORKLOADS=all ITER=1 WARMUP_SECONDS=0 DURATION=60 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/postgresql/configs/original.conf \
 bash $HOME/pcbench/tools/3_run_workload.sh
 
@@ -132,7 +142,7 @@ bash $HOME/pcbench/tools/6_collect_aug.sh
 
 ```bash
 # PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script)
-SUT=postgres WORKLOADS=all ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
+SUT=postgresql WORKLOADS=all ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
 CONFIG_FILE=$HOME/pcbench/postgresql/configs/optimized.conf \
 bash $HOME/pcbench/tools/7_validator.sh
 
@@ -167,18 +177,18 @@ bash $HOME/pcbench/tools/8_summarizer.sh
 
 ```bash
 # PostgreSQL (uses pgsql_bench.sh; ITER is controlled inside that script)
-SUT=postgres WORKLOADS=all ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
-CONFIG_FILE=$HOME/pcbench/postgresql/configs/optimized.conf \
+SUT=postgresql WORKLOADS=all ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
+CONFIG_FILE=$HOME/pcbench/postgresql/configs/original.conf \
 bash $HOME/pcbench/tools/runner.sh
 
 # nginx
 SUT=nginx ITER=1 WARMUP_SECONDS=30 CONCURRENCY=10 DURATION=120 THREADCOUNT=10 \
-CONFIG_FILE=$HOME/pcbench/nginx/configs/optimized.conf \
+CONFIG_FILE=$HOME/pcbench/nginx/configs/original.conf \
 bash $HOME/pcbench/tools/runner.sh
 
 # redis
 SUT=redis ITER=1 WARMUP_SECONDS=30 DURATION=120 THREADCOUNT=10 \
-CONFIG_FILE=$HOME/pcbench/redis/configs/optimized.conf \
+CONFIG_FILE=$HOME/pcbench/redis/configs/original.conf \
 bash $HOME/pcbench/tools/runner.sh
 ```
 

@@ -6,17 +6,17 @@ die(){ echo -e "[$(date +%T)] ❌ $*" >&2; exit 1; }
 ARTI_ROOT="${ARTI_ROOT:-$HOME/pcbench_runs}"
 LOG_DIR="${LOG_DIR:-$ARTI_ROOT/logs}"
 ORACLE="${ORACLE:-$ARTI_ROOT/oracle.jsonl}"
-SUT="${SUT:-postgres}"
+SUT="${SUT:-postgresql}"
 WORKLOADS="${WORKLOADS:-medium}"
 ITER="${ITER:-1}"
-CONF_PATH="${CONF_PATH:?Provide optimized CONF_PATH}"
+CONF_PATH="${CONF_PATH:-$HOME/pcbench/${SUT}/configs/optimized.conf}"
 THREADCOUNT="${THREADCOUNT:-12}"
 DURATION="${DURATION:-180}"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 mkdir -p "$ARTI_ROOT" "$LOG_DIR"
 
 extract_last_tps_pg(){
-  grep -F "Throughput" -R "$HOME/benchbase/target/benchbase-postgres/results" -n 2>/dev/null | tail -n1 | \
+  grep -F "Throughput" -R "$HOME/benchbase/target/benchbase-postgresql/results" -n 2>/dev/null | tail -n1 | \
   awk '{for(i=1;i<=NF;i++) if ($i ~ /^[0-9.]+$/) print $i}' | tail -n1
 }
 
@@ -37,7 +37,7 @@ PY
 
 # Apply config and do one measurement pass (PG shown; nginx/redis similar)
 case "$SUT" in
-  postgres)
+  postgresql)
     [ -f "$CONF_PATH" ] || die "Missing optimized PG conf"
     cp "$HOME/pgdata/postgresql.conf" "$HOME/pgdata/postgresql.conf.pre_opt.$(date +%s)"
     cat "$CONF_PATH" >> "$HOME/pgdata/postgresql.conf"

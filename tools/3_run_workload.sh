@@ -10,7 +10,7 @@ log(){ echo -e "[$(date +%T)] $*"; }
 die(){ echo -e "[$(date +%T)] ❌ $*" >&2; exit 1; }
 
 # ---------- CLI/env knobs (common) ----------
-SUT="${SUT:-postgres}"                          # postgres | nginx | redis
+SUT="${SUT:-postgresql}"                        # postgresql | nginx | redis
 WORKLOADS="${WORKLOADS:-all}"                   # accepted for CLI parity; per-SUT scripts may ignore
 ITER="${ITER:-3}"
 WARMUP_SECONDS="${WARMUP_SECONDS:-30}"
@@ -194,7 +194,7 @@ run_redis(){
 
 # ---------- main ----------
 case "$SUT" in
-  postgres) run_postgres ;;
+  postgresql) run_postgres ;;
   nginx)    run_nginx    ;;
   redis)    run_redis    ;;
   *) die "Unknown SUT: $SUT" ;;

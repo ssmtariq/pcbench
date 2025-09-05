@@ -3,7 +3,7 @@ set -Eeuo pipefail
 ARTI_ROOT="${ARTI_ROOT:-$HOME/pcbench_runs}"
 LOG_DIR="${LOG_DIR:-$ARTI_ROOT/logs}"
 OUT_CSV="${ARTI_ROOT}/memory_classification.csv"
-SUT="${SUT:-postgres}"
+SUT="${SUT:-postgresql}"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 mkdir -p "$ARTI_ROOT" "$LOG_DIR"
 

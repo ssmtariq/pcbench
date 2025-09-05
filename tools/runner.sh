@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 # Parameters flow to child scripts via env
-export SUT="${SUT:-postgres}"
+export SUT="${SUT:-postgresql}"
 export WORKLOADS="${WORKLOADS:-all}"
 export ITER="${ITER:-3}"
 export CONF_PATH="${CONF_PATH:-}"

@@ -6,7 +6,7 @@ ARTI_ROOT="${ARTI_ROOT:-$HOME/pcbench_runs}"
 LOG_DIR="${LOG_DIR:-$ARTI_ROOT/logs}"
 BUNDLE_DIR="${BUNDLE_DIR:-$ARTI_ROOT/bundle}"
 HPC_DB="${HPC_DB:-$ARTI_ROOT/hpctoolkit_database}"
-SUT="${SUT:-postgres}"
+SUT="${SUT:-postgresql}"
 CONF_PATH="${CONF_PATH:-}"
 THREADS="${THREADS:-$(nproc || echo 8)}"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -19,14 +19,14 @@ fi
 
 # 7B: knobs/docs
 case "$SUT" in
-  postgres) psql -Atqc "SELECT name, setting, unit, short_desc FROM pg_settings ORDER BY name" > "${BUNDLE_DIR}/pg_knobs.tsv" || true ;;
+  postgresql) psql -Atqc "SELECT name, setting, unit, short_desc FROM pg_settings ORDER BY name" > "${BUNDLE_DIR}/pg_knobs.tsv" || true ;;
   nginx)    nginx -T > "${BUNDLE_DIR}/nginx_full_config.txt" 2>&1 || true; nginx -V > "${BUNDLE_DIR}/nginx_version.txt" 2>&1 || true ;;
   redis)    redis-cli CONFIG GET '*' > "${BUNDLE_DIR}/redis_knobs.txt" 2>&1 || true; redis-server --help > "${BUNDLE_DIR}/redis_help.txt" 2>&1 || true ;;
 esac
 
 # 7C: source code (best-effort)
 case "$SUT" in
-  postgres) [ -d "$HOME/postgresql-16.1" ] && (cd "$HOME/postgresql-16.1" && tar czf "${BUNDLE_DIR}/postgresql-16.1_src.tgz" .) || true ;;
+  postgresql) [ -d "$HOME/postgresql-16.1" ] && (cd "$HOME/postgresql-16.1" && tar czf "${BUNDLE_DIR}/postgresql-16.1_src.tgz" .) || true ;;
   nginx)    set +e; apt-get source -y nginx >/dev/null 2>&1 && tar czf "${BUNDLE_DIR}/nginx_src.tgz" nginx-*; set -e ;;
   redis)    set +e; apt-get source -y redis >/dev/null 2>&1 && tar czf "${BUNDLE_DIR}/redis_src.tgz" redis-*; set -e ;;
 esac
