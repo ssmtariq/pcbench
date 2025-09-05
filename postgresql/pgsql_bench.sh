@@ -11,6 +11,15 @@ log()   { printf '\n[%s] %s\n'  "$(date '+%F %T')"  "$*"; }
 fatal() { printf '\n❌  %s\n'   "$*" >&2; exit 1; }
 trap 'fatal "Command \"${BASH_COMMAND}\" failed (line ${LINENO})"' ERR
 
+# -------- ensure benchbase database exists ----------------------------------
+log "Ensuring 'benchbase' database exists"
+if ! psql -tAc "SELECT 1 FROM pg_database WHERE datname='benchbase'" | grep -q 1; then
+  log "Database 'benchbase' not found → creating"
+  createdb benchbase
+else
+  log "Database 'benchbase' already exists"
+fi
+
 # -------- paths & constants --------------------------------------------------
 # Source workloads directory (renamed from SRC_DIR per request) -> BenchBase config dir
 WORKLOAD_DIR="$HOME/pcbench/postgresql/workload"
@@ -122,7 +131,7 @@ read mean stdev <<<"$(awk '
   END {
     mean  = sum / n
     var   = (n > 1) ? (sumsq - sum*sum/n)/(n-1) : 0
-    printf \"%.6f %.6f\", mean, sqrt(var)
+    printf "%f %f", mean, sqrt(var)
   }
 ' "$THR_FILE")"
 
