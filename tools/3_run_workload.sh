@@ -18,7 +18,7 @@ DURATION="${DURATION:-180}"
 THREADCOUNT="${THREADCOUNT:-12}"
 CONCURRENCY="${CONCURRENCY:-500}"               # nginx (mapped to CONNECTIONS)
 CONFIG_FILE="${CONFIG_FILE:-}"                  # defaulted per SUT below
-MEASURE_TARGET="${MEASURE_TARGET:-server}"      # server | client | system
+MEASURE_TARGET="${MEASURE_TARGET:-server}"      # server | client | system | server_exec  (NEW)
 
 # ---------- paths & logs ----------
 REPO_ROOT="${REPO_ROOT:-$HOME/pcbench}"
@@ -84,6 +84,32 @@ print(out)
 PY
 }
 
+# === NEW: attach perf to server PIDs for an explicit number of seconds ===
+perf_stat_attach_pids_for(){
+  local label="$1"; shift
+  local pids_csv="$1"; shift
+  local secs="$1"; shift
+  local raw="$LOG_DIR/perf_${label}_raw.txt"
+  local sum="$LOG_DIR/perf_${label}_summary.json"
+  perf stat -x, -p "$pids_csv" \
+    -e cycles,instructions,cache-references,cache-misses,branches,branch-misses,context-switches,major-faults \
+    -- sleep "$secs" 1>/dev/null 2> "$raw" || true
+  python3 - "$raw" "$sum" <<'PY'
+import json,sys
+raw,out=sys.argv[1],sys.argv[2]
+m={}
+for L in open(raw):
+  p=L.strip().split(',')
+  if len(p)<3: continue
+  try: v=float(p[0])
+  except: continue
+  k=p[2].strip().replace('-','_').replace(':','_').replace(' ','_')
+  m[k]=v
+open(out,'w').write(json.dumps(m,indent=2))
+print(out)
+PY
+}
+
 # ---------- helpers ----------
 ensure_file(){ [[ -f "$1" ]] || die "Required file not found: $1"; }
 
@@ -96,6 +122,28 @@ apply_pg_conf(){
   cat "$CONFIG_FILE" >> "$pgdata/postgresql.conf"
   pg_ctl -D "$pgdata" restart -m fast
 }
+
+# === NEW: resolve BenchBase XML for the chosen workload (mirror runner) ===
+pg_resolve_xml_for_workload(){
+  local size="$1"
+  local base="$HOME/benchbase/target/benchbase-postgres/config/postgres"
+  case "$size" in
+    small) echo "$base/xl170_tpcc_small.xml" ;;
+    large) echo "$base/xl170_tpcc_large.xml" ;;
+    xl)    echo "$base/xl170_tpcc_xl.xml" ;;
+    *)     echo "$base/xl170_tpcc_small.xml" ;;
+  esac
+}
+
+# === NEW: parse <time> from the BenchBase XML so perf matches execute window ===
+pg_parse_time_from_xml(){
+  local xml="$1"
+  [[ -f "$xml" ]] || { echo ""; return; }
+  awk 'tolower($0) ~ /<time>/ { gsub(/.*<time>|<\/time>.*/, "", $0); if ($0 ~ /^[0-9]+$/){print $0; exit} }' "$xml"
+}
+
+# === NEW: collect all postgres PIDs ===
+pg_collect_pids(){ pgrep -x postgres | paste -sd, -; }
 
 # ---------- per-SUT invocations ----------
 run_postgres(){
@@ -126,6 +174,39 @@ run_postgres(){
   [[ -n "${SAMPLE_INTERVAL:-}" ]] && export SAMPLE_INTERVAL
 
   local label="pg_${TS}"
+
+  # === NEW: server_exec → attach only during measured execute window ===
+  if [ "$MEASURE_TARGET" = "server_exec" ]; then
+    local RUN_LOG="$LOG_DIR/pg_runner_${TS}.log"
+    log "Postgres: server_exec → attach perf for the measured execute window only"
+    ( bash "$runner" | tee "$RUN_LOG" ) & RUNNER_PID=$!
+    log "Postgres: waiting for measured execute to begin…"
+    while :; do
+      grep -q "measured execute" "$RUN_LOG" && break
+      sleep 0.3
+      kill -0 "$RUNNER_PID" 2>/dev/null || break
+    done
+    sleep 2  # allow client terminals to connect and fork backends
+
+    local pids2; pids2="$(pg_collect_pids)"
+    if [[ -z "$pids2" ]]; then
+      log "Postgres: could not resolve server PIDs; falling back to client wrap"
+      wait "$RUNNER_PID" || true
+      perf_stat_wrap "$label" true
+      return
+    fi
+
+    local xml secs
+    xml="$(pg_resolve_xml_for_workload "${WORKLOAD:-small}")"   # mirrors runner config paths
+    secs="$(pg_parse_time_from_xml "$xml")"
+    [[ -z "$secs" ]] && secs="$DURATION"
+    log "Postgres: attaching to PIDs: $pids2 for ${secs}s (execute window)"
+    perf_stat_attach_pids_for "$label" "$pids2" "$secs"
+    wait "$RUNNER_PID" || true
+    return
+  fi
+  # === END NEW ===
+
   if [ "$MEASURE_TARGET" = "server" ] && [ -n "$pids" ]; then
     log "Postgres: attaching perf to server PIDs: $pids (duration=${DURATION}s); running pgsql_bench.sh"
     perf_stat_attach_pids_during "$label" "$pids" bash "$runner"
