@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # 3_run_workload.sh — PCBench unified wrapper (uses existing SUT runners)
 # - Creates perf_*_summary.json under ~/pcbench_runs/logs
-# - Defaults CONFIG_FILE to pcbench/<sut>/configs/original.conf
 # - Delegates actual benchmarking to per-SUT scripts
 
 set -Eeuo pipefail
@@ -10,15 +9,17 @@ log(){ echo -e "[$(date +%T)] $*"; }
 die(){ echo -e "[$(date +%T)] ❌ $*" >&2; exit 1; }
 
 # ---------- CLI/env knobs (common) ----------
-SUT="${SUT:-postgresql}"                        # postgresql | nginx | redis
-WORKLOADS="${WORKLOADS:-small}"                   # accepted for CLI parity; per-SUT scripts may ignore
+SUT="${SUT:-postgresql}"                 # postgresql | nginx | redis
+WORKLOADS="${WORKLOADS:-small}"          # small | large | xl  (mapped to per-SUT)
 ITER="${ITER:-3}"
 WARMUP_SECONDS="${WARMUP_SECONDS:-30}"
 DURATION="${DURATION:-180}"
 THREADCOUNT="${THREADCOUNT:-12}"
-CONCURRENCY="${CONCURRENCY:-500}"               # nginx (mapped to CONNECTIONS)
-CONFIG_FILE="${CONFIG_FILE:-}"                  # defaulted per SUT below
-MEASURE_TARGET="${MEASURE_TARGET:-server}"      # server | client | system | server_exec  (NEW)
+CONCURRENCY="${CONCURRENCY:-500}"        # nginx (mapped to CONNECTIONS)
+CONFIG_FILE="${CONFIG_FILE:-}"           # defaulted per SUT below
+MEASURE_TARGET="${MEASURE_TARGET:-server}"   # server | client | system | server_exec
+RAMP_SECONDS="${RAMP_SECONDS:-5}"        # time to let clients connect before attaching perf
+PID_RETRY_SEC="${PID_RETRY_SEC:-15}"     # seconds to retry collecting server PIDs
 
 # ---------- paths & logs ----------
 REPO_ROOT="${REPO_ROOT:-$HOME/pcbench}"
@@ -52,19 +53,16 @@ print(out)
 PY
 }
 
-# NEW: attach perf to server PIDs for a fixed window while running the client
 perf_stat_attach_pids_during(){
   local label="$1"; shift
   local pids_csv="$1"; shift
   local raw="$LOG_DIR/perf_${label}_raw.txt"
   local sum="$LOG_DIR/perf_${label}_summary.json"
 
-  # Start perf attached to PIDs for DURATION seconds, then run the client concurrently
   ( perf stat -x, -p "$pids_csv" \
       -e cycles,instructions,cache-references,cache-misses,branches,branch-misses,context-switches,major-faults \
       -- sleep "${DURATION}" ) 1>/dev/null 2> "$raw" & PERF_PID=$!
 
-  # Run client workload (benchmark runner) while perf is active
   "$@" || true
   wait "$PERF_PID" || true
 
@@ -84,16 +82,17 @@ print(out)
 PY
 }
 
-# === NEW: attach perf to server PIDs for an explicit number of seconds ===
 perf_stat_attach_pids_for(){
   local label="$1"; shift
   local pids_csv="$1"; shift
   local secs="$1"; shift
   local raw="$LOG_DIR/perf_${label}_raw.txt"
   local sum="$LOG_DIR/perf_${label}_summary.json"
+
   perf stat -x, -p "$pids_csv" \
     -e cycles,instructions,cache-references,cache-misses,branches,branch-misses,context-switches,major-faults \
     -- sleep "$secs" 1>/dev/null 2> "$raw" || true
+
   python3 - "$raw" "$sum" <<'PY'
 import json,sys
 raw,out=sys.argv[1],sys.argv[2]
@@ -123,7 +122,7 @@ apply_pg_conf(){
   pg_ctl -D "$pgdata" restart -m fast
 }
 
-# === NEW: resolve BenchBase XML for the chosen workload (mirror runner) ===
+# Map WORKLOADS -> BenchBase XML
 pg_resolve_xml_for_workload(){
   local size="$1"
   local base="$HOME/benchbase/target/benchbase-postgres/config/postgres"
@@ -135,81 +134,86 @@ pg_resolve_xml_for_workload(){
   esac
 }
 
-# === NEW: parse <time> from the BenchBase XML so perf matches execute window ===
+# Extract <time> from BenchBase XML
 pg_parse_time_from_xml(){
   local xml="$1"
   [[ -f "$xml" ]] || { echo ""; return; }
   awk 'tolower($0) ~ /<time>/ { gsub(/.*<time>|<\/time>.*/, "", $0); if ($0 ~ /^[0-9]+$/){print $0; exit} }' "$xml"
 }
 
-# === NEW: collect all postgres PIDs ===
-pg_collect_pids(){ pgrep -x postgres | paste -sd, -; }
+# collect postgres PIDs (retry window)
+pg_collect_pids_retry(){
+  local until=$(( $(date +%s) + PID_RETRY_SEC ))
+  local p=""
+  while :; do
+    p="$(pgrep -x postgres | paste -sd, -)"
+    [[ -n "$p" ]] && { echo "$p"; return; }
+    [[ $(date +%s) -ge $until ]] && { echo ""; return; }
+    sleep 0.5
+  done
+}
 
 # ---------- per-SUT invocations ----------
 run_postgres(){
-  # Defaults
   local default_cfg="$REPO_ROOT/postgresql/configs/original.conf"
   CONFIG_FILE="${CONFIG_FILE:-$default_cfg}"
   ensure_file "$CONFIG_FILE"
   local runner="$REPO_ROOT/postgresql/pgsql_bench.sh"
   ensure_file "$runner"
 
-  log "Postgres: applying config: $CONFIG_FILE"
-  apply_pg_conf
-
-  # Ensure server is up (so we can attach to its PIDs)
-  pg_ctl -D "${PGDATA:-$HOME/pgdata}" -l "$LOG_DIR/pg.log" status >/dev/null 2>&1 || \
-    pg_ctl -D "${PGDATA:-$HOME/pgdata}" -l "$LOG_DIR/pg.log" start
-
-  local pids
-  pids="$(pgrep -x postgres | tr '\n' ',' | sed 's/,$//')"
-
-  # Map outer WORKLOADS (small|large|xl) to the PG runner's WORKLOAD
+  # Map wrapper vars -> runner env (the runner already understands WORKLOAD)
   if [[ -n "${WORKLOADS:-}" ]]; then
     case "$WORKLOADS" in small|large|xl) export WORKLOAD="$WORKLOADS" ;; esac
   fi
-  # Still allow explicit POSTGRES_WORKLOAD to override everything
-  if [[ -n "${POSTGRES_WORKLOAD:-}" ]]; then export WORKLOAD="$POSTGRES_WORKLOAD"; fi
-  # Optional: pass through sample interval if provided
-  [[ -n "${SAMPLE_INTERVAL:-}" ]] && export SAMPLE_INTERVAL
+  [[ -n "${ITER:-}" ]] && export ITERATIONS="$ITER"
+  [[ -n "${WARMUP_SECONDS:-}" ]] && export WARMUP_SECONDS
+  [[ -n "${DURATION:-}" ]] && export DURATION
+  [[ -n "${THREADCOUNT:-}" ]] && export THREADCOUNT
+
+  log "Postgres: applying config: $CONFIG_FILE"
+  apply_pg_conf
+
+  # Ensure server is up
+  local pgdata="${PGDATA:-$HOME/pgdata}"
+  pg_ctl -D "$pgdata" -l "$LOG_DIR/pg.log" status >/dev/null 2>&1 || \
+    pg_ctl -D "$pgdata" -l "$LOG_DIR/pg.log" start
 
   local label="pg_${TS}"
 
-  # === NEW: server_exec → attach only during measured execute window ===
+  # --- server_exec: start runner, ramp, attach for execute window from XML ---
   if [ "$MEASURE_TARGET" = "server_exec" ]; then
-    local RUN_LOG="$LOG_DIR/pg_runner_${TS}.log"
-    log "Postgres: server_exec → attach perf for the measured execute window only"
-    ( bash "$runner" | tee "$RUN_LOG" ) & RUNNER_PID=$!
-    log "Postgres: waiting for measured execute to begin…"
-    while :; do
-      grep -q "measured execute" "$RUN_LOG" && break
-      sleep 0.3
-      kill -0 "$RUNNER_PID" 2>/dev/null || break
-    done
-    sleep 2  # allow client terminals to connect and fork backends
+    log "Postgres: server_exec → start client, ramp ${RAMP_SECONDS}s, attach to server PIDs for execute window"
+    ( bash "$runner" ) & RUNNER_PID=$!
 
-    local pids2; pids2="$(pg_collect_pids)"
-    if [[ -z "$pids2" ]]; then
+    # ramp so client connects and backends fork
+    sleep "$RAMP_SECONDS"
+
+    # gather PIDs with retries
+    local pids; pids="$(pg_collect_pids_retry)"
+    if [[ -z "$pids" ]]; then
       log "Postgres: could not resolve server PIDs; falling back to client wrap"
       wait "$RUNNER_PID" || true
       perf_stat_wrap "$label" true
       return
     fi
 
+    # derive execute seconds from XML (fallback: DURATION)
     local xml secs
-    xml="$(pg_resolve_xml_for_workload "${WORKLOAD:-small}")"   # mirrors runner config paths
+    xml="$(pg_resolve_xml_for_workload "${WORKLOAD:-${WORKLOADS:-small}}")"
     secs="$(pg_parse_time_from_xml "$xml")"
     [[ -z "$secs" ]] && secs="$DURATION"
-    log "Postgres: attaching to PIDs: $pids2 for ${secs}s (execute window)"
-    perf_stat_attach_pids_for "$label" "$pids2" "$secs"
+
+    log "Postgres: attaching to PIDs: $pids for ${secs}s (execute window)"
+    perf_stat_attach_pids_for "$label" "$pids" "$secs"
+
     wait "$RUNNER_PID" || true
     return
   fi
-  # === END NEW ===
-
-  if [ "$MEASURE_TARGET" = "server" ] && [ -n "$pids" ]; then
-    log "Postgres: attaching perf to server PIDs: $pids (duration=${DURATION}s); running pgsql_bench.sh"
-    perf_stat_attach_pids_during "$label" "$pids" bash "$runner"
+  # --- server (whole run) ---
+  local pids_all; pids_all="$(pg_collect_pids_retry)"
+  if [ "$MEASURE_TARGET" = "server" ] && [ -n "$pids_all" ]; then
+    log "Postgres: attaching perf to server PIDs: $pids_all (duration=${DURATION}s); running pgsql_bench.sh"
+    perf_stat_attach_pids_during "$label" "$pids_all" bash "$runner"
   else
     log "Postgres: MEASURE_TARGET=$MEASURE_TARGET or no PIDs → wrapping client runner"
     perf_stat_wrap "$label" bash "$runner"
@@ -217,14 +221,12 @@ run_postgres(){
 }
 
 run_nginx(){
-  # Defaults + paths
   local default_cfg="$REPO_ROOT/nginx/configs/original.conf"
   CONFIG_FILE="${CONFIG_FILE:-$default_cfg}"
   ensure_file "$CONFIG_FILE"
   local runner="$REPO_ROOT/nginx/nginx_bench.sh"
   ensure_file "$runner"
 
-  # Map wrapper vars -> nginx_bench.sh env
   export NGINX_CONF="$CONFIG_FILE"
   export ITERATIONS="$ITER"
   export WARMUP_SECONDS="$WARMUP_SECONDS"
@@ -233,12 +235,9 @@ run_nginx(){
   export CONNECTIONS="${CONCURRENCY}"
   export WRK_BIN="${WRK_BIN:-$HOME/wrk/wrk}"
 
-  # Ensure nginx is up so we can attach to it (bench script may also manage it)
   sudo systemctl is-active nginx >/dev/null 2>&1 || sudo systemctl start nginx || true
   sleep 1
-  # Collect master + worker PIDs
-  local master=""
-  [ -f /run/nginx.pid ] && master="$(cat /run/nginx.pid 2>/dev/null || true)"
+  local master=""; [ -f /run/nginx.pid ] && master="$(cat /run/nginx.pid 2>/dev/null || true)"
   local workers="$(pgrep -f 'nginx: worker process' | tr '\n' ',' | sed 's/,$//')"
   local pids_csv="$master${workers:+,$workers}"
 
@@ -253,24 +252,20 @@ run_nginx(){
 }
 
 run_redis(){
-  # Defaults + paths
   local default_cfg="$REPO_ROOT/redis/configs/original.conf"
   CONFIG_FILE="${CONFIG_FILE:-$default_cfg}"
   ensure_file "$CONFIG_FILE"
   local runner="$REPO_ROOT/redis/redis_bench.sh"
   ensure_file "$runner"
 
-  # Map wrapper vars -> redis_bench.sh env
   export REDIS_CONF="$CONFIG_FILE"
   export ITERATIONS="$ITER"
   export WARMUP_SECONDS="$WARMUP_SECONDS"
   export DURATION="$DURATION"
   export THREADS="${THREADCOUNT}"
 
-  # Ensure redis-server is up so we can attach PIDs (bench script may also manage it)
   pgrep -x redis-server >/dev/null 2>&1 || (nohup redis-server --save "" --appendonly no >/dev/null 2>&1 & sleep 1)
-  local pids_csv
-  pids_csv="$(pgrep -x redis-server | tr '\n' ',' | sed 's/,$//')"
+  local pids_csv="$(pgrep -x redis-server | tr '\n' ',' | sed 's/,$//')"
 
   local label="redis_${TS}"
   if [ "$MEASURE_TARGET" = "server" ] && [ -n "$pids_csv" ]; then
@@ -285,8 +280,8 @@ run_redis(){
 # ---------- main ----------
 case "$SUT" in
   postgresql) run_postgres ;;
-  nginx)    run_nginx    ;;
-  redis)    run_redis    ;;
+  nginx)      run_nginx    ;;
+  redis)      run_redis    ;;
   *) die "Unknown SUT: $SUT" ;;
 esac
 
