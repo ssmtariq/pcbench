@@ -164,12 +164,12 @@ export LIKWID_PERF_PID="$PID"
 measure_group() {
   local G="$1"; local PF="$OUT/app/${G}.out"
   [ -z "$G" ] && return 0
-  log "Measuring group $G for ${APP_MEASURE_S}s on cores $CORES (attached to PID $PID)"
+  log "Measuring group $G for ${APP_MEASURE_S}s on cores $CORES (backend pinned)"
   if [ "$(id -u)" -ne 0 ]; then
-    sudo -E likwid-perfctr -C "$CORES" -g "$G" -p "$PID" -t "$APP_MEASURE_S" \
+    sudo -E likwid-perfctr -C "$CORES" -g "$G" -- sleep "$APP_MEASURE_S" \
       | tee "$PF" >/dev/null || warn "Group $G failed"
   else
-    likwid-perfctr -C "$CORES" -g "$G" -p "$PID" -t "$APP_MEASURE_S" \
+    likwid-perfctr -C "$CORES" -g "$G" -- sleep "$APP_MEASURE_S" \
       | tee "$PF" >/dev/null || warn "Group $G failed"
   fi
 }
