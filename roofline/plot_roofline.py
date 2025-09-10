@@ -36,6 +36,9 @@ def plot_roofline(csv_path, title=None, savepath=None):
     if not roofs:
         raise RuntimeError("No roofs found in CSV (roof_L1/roof_L2/roof_L3/roof_MEM)")
 
+    # Optional compute roof (Instruction/s estimate)
+    compute_instr_roof = d.get('roof_compute_instr_per_sec_est')
+
     # X domain: cover app point and reasonable margin
     # On an Instruction Roofline, performance = min_i (x * B_i) and optionally a compute roof (not drawn here).
     # We just draw the four slanted roofs.
@@ -48,6 +51,11 @@ def plot_roofline(csv_path, title=None, savepath=None):
     for label, B in roofs:
         ys = [x * B for x in xs]
         plt.loglog(xs, ys, label=f"{label} roof")
+
+    # Optional flat compute roof (instr/s)
+    if compute_instr_roof is not None and compute_instr_roof > 0:
+        ys = [compute_instr_roof for _ in xs]
+        plt.loglog(xs, ys, linestyle='--', label="Compute roof (instr/s est)")
 
     # Plot app point
     plt.loglog([app_x], [app_instr_per_s], marker='o', linestyle='None', label="PostgreSQL (tpcc)")
