@@ -53,24 +53,15 @@ log "Results directory: $OUT"
 # -------------------------- helper: parse LIKWID output ------------------------
 # Sum a metric row across columns (or use the single value) from the Metrics table
 get_metric_sum() {
-  local name="$1" file="$2"
-  # Match the metric name between pipes regardless of spacing
-  awk -v n="$name" -F '|' '
-    BEGIN{sum=0}
-    $0 ~ "\\|" && $0 ~ n {
-      # last column is usually the single HWThread value; if SUM column exists, prefer it
-      # strip non-numeric
-      for (i=1;i<=NF;i++) {
-        col=$i; gsub(/^[ \t]+|[ \t]+$/,"",col)
-        if (col=="SUM") { v=$(i+1); gsub(/[^0-9.\-]/,"",v); if (v!="") {sum=v; found=1; break} }
-      }
-      if (!found) { v=$NF; gsub(/[^0-9.\-]/,"",v); if (v!="") sum+=v }
-      print sum; exit
-    }
-  ' "$file" 2>/dev/null
+  local name_re="$1" file="$2"
+  awk -F '|' -v pat="$name_re" '
+    $0 ~ /\|/ && $0 ~ pat {
+      v = $(NF-1); gsub(/[^0-9.\-]/,"", v);
+      if (v != "") { print v; exit }
+    }' "$file" 2>/dev/null
 }
 
-get_mem_bw_sum() { get_metric_sum "Memory bandwidth \\[MBytes/s\\]" "$1"; }
+get_mem_bw_sum() { get_metric_sum "Memory bandwidth \\[(MByte|MBytes)/s\\]" "$1"; }
 
 get_instructions_sum() {
   # Sum INSTR_RETIRED_ANY across HWThread columns in the Events table
@@ -80,8 +71,12 @@ get_instructions_sum() {
 }
 
 get_runtime_s() {
-  # Extract measured Runtime (RDTSC) [s]
-  awk '/Runtime \(RDTSC\) \[s\]/ {print $NF; exit}' "$1" 2>/dev/null || true
+  # Extract numeric value from the Metrics table row:
+  # | Runtime (RDTSC) [s] |   2.0011 |
+  awk -F '|' '/Runtime \(RDTSC\) \[s\]/ {
+      v = $(NF-1); gsub(/[^0-9.]/,"", v);
+      if (v != "") { print v; exit }
+    }' "$1" 2>/dev/null || true
 }
 
 # -------------------------- step A: roofs (L1/L2/L3/MEM) -----------------------
