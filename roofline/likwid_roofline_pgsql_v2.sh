@@ -60,8 +60,12 @@ get_metric_cell() {
   local pat="$1" file="$2"
   awk -F '|' -v pat="$pat" '
     $0 ~ /\|/ && $2 ~ pat {
-      v=$(NF-1); gsub(/[^0-9.+-eE]/,"",v);
-      if (v != "") { print v; exit }
+      # scan right-to-left for the first numeric-looking cell
+      for (i = NF; i >= 1; i--) {
+        v = $i
+        gsub(/[^0-9.+-eE]/, "", v)
+        if (v != "") { print v; exit }
+      }
     }' "$file" 2>/dev/null
 }
 
