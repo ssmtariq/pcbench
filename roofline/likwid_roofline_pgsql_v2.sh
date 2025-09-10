@@ -12,6 +12,7 @@ shopt -s inherit_errexit
 log()   { printf '\n[%s] %s\n'  "$(date '+%F %T')" "$*"; }
 warn()  { printf '\n⚠️  %s\n'  "$*" >&2; }
 fatal() { printf '\n❌ %s\n'   "$*" >&2; exit 1; }
+dbg() { printf '[DEBUG] %s\n' "$*" >&2; }
 trap 'fatal "Command \"${BASH_COMMAND}\" failed (line ${LINENO})"' ERR
 
 need()  { command -v "$1" >/dev/null 2>&1 || fatal "Missing dependency: $1"; }
@@ -59,7 +60,7 @@ log "Results directory: $OUT"
 get_metric_cell() {
   local pat="$1" file="$2"
   awk -F '|' -v pat="$pat" '
-    $0 ~ /\|/ && $2 ~ pat {
+    $0 ~ /\|/ && $0 ~ pat {
       # scan right-to-left for the first numeric-looking cell
       for (i = NF; i >= 1; i--) {
         v = $i
@@ -71,7 +72,7 @@ get_metric_cell() {
 
 # MEM bandwidth row in Metrics table (works for both "MByte/s" and "MBytes/s")
 get_mem_bw_sum() {
-  get_metric_cell "^[[:space:]]*Memory[[:space:]]*bandwidth[[:space:]]*\\[(MByte|MBytes)/s\\]" "$1"
+  get_metric_cell "Memory([[:space:]]+read)?[[:space:]]+bandwidth[[:space:]]*\\[(MByte|MBytes)/s\\]" "$1"
 }
 
 # CPI and IPC metric (from TMA/CPI/CACHES groups)
@@ -326,6 +327,8 @@ CSV="$OUT/roofline_summary.csv"
   [ -n "$BW_L1" ] && echo "app_l1_bandwidth,$BW_L1,MBytes/s,LIKWID $G_L1 SUM"
   [ -n "$INSTR" ] && echo "app_instructions,$INSTR,count,LIKWID $G_CPI (INSTR_RETIRED_ANY)"
   [ -n "$RT_S" ] && echo "app_runtime,$RT_S,s,From $G_CPI Runtime RDTSC"
+  [ -n "$INSTR_PER_S" ] && echo "app_instr_per_sec,$INSTR_PER_S,1/s,Derived"
+  [ -n "$INSTR_PER_BYTE" ] && echo "app_instr_per_byte,$INSTR_PER_BYTE,1/byte,Instruction Roofline intensity"
   [ -n "$INSTR_PER_S" ] && echo "app_instr_per_sec,$INSTR_PER_S,1/s,Derived"
   [ -n "$INSTR_PER_BYTE" ] && echo "app_instr_per_byte,$INSTR_PER_BYTE,1/byte,Instruction Roofline intensity"
   [ -n "$ROOF_L1" ] && echo "roof_L1,$ROOF_L1,MBytes/s,likwid-bench load_avx ${SZS[L1]} ${THREADS}t"
