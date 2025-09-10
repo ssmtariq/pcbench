@@ -41,20 +41,36 @@ Here’s a clean, repeatable way to put **PostgreSQL-16.1 + BenchBase** on a **L
 
 # How to run (copy-paste)
 
-1. **Put the script in place and make it executable:**
+1. **Make the script executable:**
 
 ```bash
-nano ~/likwid_roofline_pgsql.sh    # paste the script
-chmod +x ~/likwid_roofline_pgsql.sh
+chmod +x $HOME/pcbench/roofline/likwid_roofline_pgsql.sh
+chmod +x ~/pcbench/postgresql/pgsql_bench.sh
 ```
 
 2. **Make sure BenchBase configs exist and DB is created** (your README’s TPCC steps).&#x20;
+
+## Enable MSR access (one-off per boot)
+```bash
+# Load the msr driver
+sudo modprobe msr
+
+# Loosen perf restrictions (your README suggests -1 on bare metal)
+echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid >/dev/null
+
+# (Simplest for experiments) allow MSR read/write for this session
+sudo chmod a+rw /dev/cpu/*/msr
+
+# Now verify groups show up:
+likwid-perfctr -a | sed 's/^[[:space:]]*//' | egrep '^(MEM|CPI|L1|L2|L3|L1CACHE|L2CACHE|L3CACHE)'
+export LIKWID_PERF_GROUPS=/usr/share/likwid/perfgroups
+```
 
 3. **Run a Small (60s) TPCC with warmup and measure Roofline:**
 
 ```bash
 WARMUP=1 WORKLOAD=small ITERATIONS=1 CORES=2 \
-bash ~/likwid_roofline_pgsql.sh
+bash $HOME/pcbench/roofline/likwid_roofline_pgsql.sh
 ```
 
 * `CORES=2` pins the measured Postgres backend to core 2 (adjust to your reserved cores).
@@ -64,7 +80,7 @@ bash ~/likwid_roofline_pgsql.sh
 
 ```bash
 WARMUP=1 WORKLOAD=large ITERATIONS=1 CORES=2-3 THREADS=10 \
-bash ~/likwid_roofline_pgsql.sh
+bash $HOME/pcbench/roofline/likwid_roofline_pgsql.sh
 ```
 
 * Here we pin to two cores and also use two threads for the roof measurements.
@@ -82,7 +98,7 @@ bash ~/likwid_roofline_pgsql.sh
 6. **Generate roofline plot:**
 ```bash
 pip install matplotlib
-python3 plot_roofline.py ~/likwid_roofline/<timestamp>/roofline_summary.csv roofline.png
+python3 $HOME/pcbench/roofline/plot_roofline.py ~/likwid_roofline/<timestamp>/roofline_summary.csv roofline.png
 ```
 ---
 

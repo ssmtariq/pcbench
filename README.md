@@ -154,7 +154,7 @@ jq -r '
   then "\($k) = '\''\($v)'\''"
   else "\($k) = \($v)"
   end
-'  ~/pcbench/TUNA_best_pgsql_config.json >> ~/pgdata/postgresql.conf
+'  ~/pcbench/postgresql/configs/TUNA_best_pgsql_config.json >> ~/pgdata/postgresql.conf
 
 chmod 600 ~/pgdata/postgresql.conf
 postgres -D ~/pgdata -C max_connections > /dev/null \
