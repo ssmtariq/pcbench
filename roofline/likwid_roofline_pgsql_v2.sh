@@ -93,7 +93,7 @@ get_instructions_sum() {
   # Try both encodings the perfgroups use
   local f="$1"
   local ins
-  ins="$(sum_event "INSTR(_|\\.)?RETIRED(_|\\.)?ANY" "$f")"
+  ins="$(sum_event "(INST|INSTR)(_|\\.|:)?RETIRED(_|\\.|:)?ANY(_|\\.|:)?P?" "$f")"
   [ -n "$ins" ] && { echo "$ins"; return; }
 
   # Fallback: derive from cycles and CPI/IPC
@@ -260,6 +260,18 @@ measure_group "$G_CACHES"
 measure_group "$G_L3"
 measure_group "$G_L2"
 measure_group "$G_L1"
+
+# If the chosen CPI group doesn't expose CPI/IPC, try the plain 'CPI' group
+if [ -s "$OUT/app/${G_CPI}.out" ]; then
+  test_cpi="$(get_cpi "$OUT/app/${G_CPI}.out")"
+  test_ipc="$(get_ipc "$OUT/app/${G_CPI}.out")"
+  if [ -z "$test_cpi" ] && [ -z "$test_ipc" ]; then
+    if grep -q "^CPI[[:space:]]" <<<"$GROUPS_LIST"; then
+      measure_group "CPI"
+      [ -s "$OUT/app/CPI.out" ] && G_CPI="CPI"
+    fi
+  fi
+fi
 
 # Quick sanity: fail early if we somehow didn't capture the essentials
 [ -s "$OUT/app/${G_MEM}.out" ] || warn "Missing LIKWID MEM output: $OUT/app/${G_MEM}.out"
