@@ -17,6 +17,9 @@ trap 'fatal "Command \"${BASH_COMMAND}\" failed (line ${LINENO})"' ERR
 
 need()  { command -v "$1" >/dev/null 2>&1 || fatal "Missing dependency: $1"; }
 
+export LC_ALL=C
+export LANG=C
+
 # -------------------------- inputs / defaults ----------------------------------
 # Passed through to your BenchBase runner (pgsql_bench.sh)
 WARMUP="${WARMUP:-1}"           # 0|1  (default warmup enabled)
@@ -44,8 +47,6 @@ fi
 
 # Use distro perfgroups by default unless caller overrides
 export LIKWID_PERF_GROUPS="${LIKWID_PERF_GROUPS:-/usr/share/likwid/perfgroups}"
-export LC_ALL=C
-export LANG=C
 
 # -------------------------- result workspace -----------------------------------
 TS="$(date '+%Y%m%d-%H%M%S')"
@@ -60,19 +61,19 @@ log "Results directory: $OUT"
 get_metric_cell() {
   local pat="$1" file="$2"
   awk -F '|' -v pat="$pat" '
-    $0 ~ /\|/ && $0 ~ pat {
-      # scan right-to-left for the first numeric-looking cell
+    $0 ~ pat {
       for (i = NF; i >= 1; i--) {
         v = $i
         gsub(/[^0-9.+-eE]/, "", v)
         if (v != "") { print v; exit }
       }
-    }' "$file" 2>/dev/null
+    }
+  ' "$file" 2>/dev/null
 }
 
 # MEM bandwidth row in Metrics table (works for both "MByte/s" and "MBytes/s")
 get_mem_bw_sum() {
-  get_metric_cell "Memory([[:space:]]+read)?[[:space:]]+bandwidth[[:space:]]*\\[(MByte|MBytes)/s\\]" "$1"
+  get_metric_cell 'Memory([[:space:]]+read)?[[:space:]]+bandwidth[[:space:]]*\[(MByte|MBytes)/s\]' "$1"
 }
 
 # CPI and IPC metric (from TMA/CPI/CACHES groups)
@@ -81,7 +82,15 @@ get_ipc() { get_metric_cell "^[[:space:]]*IPC[[:space:]]*$" "$1"; }
 
 # Runtime row
 get_runtime_s() {
-  get_metric_cell "^[[:space:]]*Runtime[[:space:]]*\\(RDTSC\\)[[:space:]]*\\[s\\]" "$1"
+  local file="$1"
+  awk -F '|' '
+    /Runtime([[:space:]]*\(RDTSC\))?[[:space:]]*\[s\]/ {
+      for (i = NF; i >= 1; i--) {
+        v = $i; gsub(/[^0-9.+-eE]/, "", v)
+        if (v != "") { print v; exit }
+      }
+    }
+  ' "$file" 2>/dev/null
 }
 
 # Sum an event column by name in the Events table (handles BOTH spellings)
@@ -95,24 +104,46 @@ sum_event() {
 }
 
 get_instructions_sum() {
-  # Try both encodings the perfgroups use
-  local f="$1"
-  local ins
-  ins="$(sum_event "(INST|INSTR)(_|\\.|:)?RETIRED(_|\\.|:)?ANY(_|\\.|:)?P?" "$f")"
-  [ -n "$ins" ] && { echo "$ins"; return; }
+  # Return the total retired instructions for the file $1.
+  # Strategy:
+  #   (1) Direct sum of *instructions retired* events (most reliable)
+  #   (2) Fallback: derive from cycles/CPI (preferred) or cycles*IPC
+  #
+  # NOTE: Requires sum_event, get_cpi, get_ipc helpers.
 
-  # Fallback: derive from cycles and CPI/IPC
-  local cycles cpi ipc
-  cycles="$(sum_event "CPU(_|\\.)?CLK(_|\\.)?UNHALTED(_|\\.)?CORE" "$f")"
+  local f="$1"
+  local ins cycles cpi ipc
+
+  # 1) Direct events: handle many encodings and separators (._:)
+  #    - INST_RETIRED.ANY, INST_RETIRED.ANY_P, INSTR_RETIRED_ANY
+  #    - INSTRUCTIONS_RETIRED (seen in some groups)
+  ins="$(sum_event '(INST(RUCTIONS)?|INSTR)([_.:]?)RETIRED([_.:]?)(ANY([_.:]?P)?|TOTAL)?' "$f")"
+  if [ -n "$ins" ]; then
+    echo "$ins"
+    return 0
+  fi
+
+  # 2) Fallbacks from cycles + CPI/IPC
+  # cycles: match CORE or THREAD(_P) variants; allow colon/dot/underscore
+  cycles="$(sum_event 'CPU([_.:]?)CLK\1UNHALTED([_.:]?)(CORE|THREAD([_.:]?P)?)?' "$f")"
+  # CPI/IPC taken from Metrics table
   cpi="$(get_cpi "$f")"
   ipc="$(get_ipc "$f")"
+
+  # Prefer cycles / CPI if CPI available and > 0
   if [ -n "$cycles" ] && [ -n "$cpi" ] && awk "BEGIN{exit(!($cpi>0))}"; then
-    # instr = cycles / cpi
     awk -v c="$cycles" -v p="$cpi" 'BEGIN{printf "%.0f\n", c/p}'
-  elif [ -n "$cycles" ] && [ -n "$ipc" ] && awk "BEGIN{exit(!($ipc>0))}"; then
-    # instr = cycles * ipc
-    awk -v c="$cycles" -v i="$ipc" 'BEGIN{printf "%.0f\n", c*i}'
+    return 0
   fi
+
+  # Next try cycles * IPC if IPC available and > 0
+  if [ -n "$cycles" ] && [ -n "$ipc" ] && awk "BEGIN{exit(!($ipc>0))}"; then
+    awk -v c="$cycles" -v i="$ipc" 'BEGIN{printf "%.0f\n", c*i}'
+    return 0
+  fi
+
+  # Nothing found/derivable
+  return 1
 }
 
 # -------------------------- step A: roofs (L1/L2/L3/MEM) -----------------------
@@ -284,6 +315,8 @@ fi
 
 # -------------------------- step G: compute intensity & summary ----------------
 BW_MEM="$(get_mem_bw_sum "$OUT/app/${G_MEM}.out" || true)"
+RT_S="$(get_runtime_s "$OUT/app/${G_CPI}.out")"
+[ -z "$RT_S" ] && RT_S="$APP_MEASURE_S"    # e.g., 45
 
 # Fallback: some perfgroups (or PID-filtered runs) miss MEM's rollup; CACHES has a "Memory bandwidth" metric too.
 if [ -z "$BW_MEM" ] && [ -n "$G_CACHES" ] && [ -s "$OUT/app/${G_CACHES}.out" ]; then
@@ -316,6 +349,21 @@ ROOF_L1="$(roof_pick "$OUT/roofs/L1.out")"
 ROOF_L2="$(roof_pick "$OUT/roofs/L2.out")"
 ROOF_L3="$(roof_pick "$OUT/roofs/L3.out")"
 ROOF_MEM="$(roof_pick "$OUT/roofs/MEM.out")"
+
+dbg "BW_MEM='$BW_MEM'  INSTR='$INSTR'  RT_S='$RT_S'"
+
+missing=()
+[ -z "$INSTR" ] && missing+=("INSTR")
+[ -z "$RT_S" ]  && missing+=("RT_S")
+[ -z "$BW_MEM" ] && missing+=("BW_MEM")
+
+if [ "${#missing[@]}" -eq 0 ]; then
+  INSTR_PER_S=$(awk -v i="$INSTR" -v t="$RT_S" 'BEGIN{ if(t>0) printf "%.6f", i/t }')
+  BYTES_PER_S=$(awk -v m="$BW_MEM" 'BEGIN{ printf "%.6f", m*1024*1024 }')
+  INSTR_PER_BYTE=$(awk -v ips="$INSTR_PER_S" -v bps="$BYTES_PER_S" 'BEGIN{ if(bps>0) printf "%.9f", ips/bps }')
+else
+  warn "Could not compute intensity — missing: ${missing[*]}"
+fi
 
 # Write a compact CSV summary
 CSV="$OUT/roofline_summary.csv"
