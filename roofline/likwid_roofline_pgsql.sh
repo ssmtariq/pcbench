@@ -160,28 +160,42 @@ log "Detected groups -> L1=${G_L1:-N/A}, L2=${G_L2:-N/A}, L3=${G_L3:-N/A}, MEM=$
 
 # Wait for the measured phase to start (BenchBase logs this line)
 wait_for_measured_phase() {
-  while :; do
-    if grep -q 'MEASURE :: Warmup complete, starting measurements' "$LOG_BENCH" 2>/dev/null; then
-      break
-    fi
-    sleep 1
-  done
+  log "Waiting for BenchBase measured phase marker in $LOG_BENCH"
+  # We accept either of these lines (BenchBase prints both in your logs)
+  local pat='MEASURE :: Warmup complete, starting measurements|Run 1/1 .* measured execute'
+  # tail -F follows across rotations/truncations; grep -m1 stops at the first match.
+  # We background the pipeline and wait on grep (last process) to avoid -e pipefail issues.
+  ( timeout 15m bash -c "tail -n +1 -F \"$LOG_BENCH\" | grep -E -m1 \"$pat\"" ) &
+  local wpid=$!
+  if ! wait "$wpid"; then
+    warn "Timed out waiting for measured phase marker in $LOG_BENCH"
+  else
+    log "Measured phase detected."
+  fi
 }
 
 # Get the current active tpcc backend (after restart) and re-pin it
 refresh_backend_and_pin() {
+  # Give the client threads a moment to reconnect after restart
+  sleep 1
   local newpid=""
-  for _ in $(seq 1 60); do
-    newpid="$(psql -tAc "SELECT pid
-                          FROM pg_stat_activity
-                          WHERE application_name='tpcc' AND state <> 'idle'
-                          ORDER BY backend_start DESC LIMIT 1;" 2>/dev/null | tr -d ' ')"
+  for _ in $(seq 1 120); do
+    newpid="$(psql -tAc "
+      SELECT pid
+      FROM pg_stat_activity
+      WHERE application_name='tpcc'
+        AND state IN ('active','fastpath function call','idle in transaction','idle in transaction (aborted)')
+      ORDER BY backend_start DESC
+      LIMIT 1;
+    " 2>/dev/null | tr -d ' ')"
     [ -n "$newpid" ] && break
-    sleep 1
+    sleep 0.5
   done
-  [ -z "$newpid" ] && warn "Could not find active tpcc backend after restart"
-  PID="$newpid"
-  if [ -n "$PID" ]; then
+  if [ -z "$newpid" ]; then
+    warn "Could not find a live tpcc backend after measured phase started"
+  else
+    PID="$newpid"
+    log "Re-acquired backend PID: $PID"
     if [ -n "${CORES}" ]; then
       log "Re-pinning backend $PID to cores: $CORES"
       sudo taskset -pc "$CORES" "$PID" >/dev/null || warn "taskset pin failed; continuing"
@@ -214,10 +228,14 @@ measure_group() {
 }
 
 measure_group "$G_MEM"
+measure_group "$G_CPI"
 measure_group "$G_L3"
 measure_group "$G_L2"
 measure_group "$G_L1"
-measure_group "$G_CPI"
+
+# Quick sanity: fail early if we somehow didn't capture the essentials
+[ -s "$OUT/app/${G_MEM}.out" ] || warn "Missing LIKWID MEM output: $OUT/app/${G_MEM}.out"
+[ -s "$OUT/app/${G_CPI}.out" ] || warn "Missing LIKWID $G_CPI output: $OUT/app/${G_CPI}.out"
 
 # -------------------------- step G: compute intensity & summary ----------------
 BW_MEM="$(get_mem_bw_sum "$OUT/app/${G_MEM}.out" || true)"
