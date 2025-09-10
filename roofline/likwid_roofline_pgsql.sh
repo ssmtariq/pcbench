@@ -44,11 +44,6 @@ fi
 # Use distro perfgroups by default unless caller overrides
 export LIKWID_PERF_GROUPS="${LIKWID_PERF_GROUPS:-/usr/share/likwid/perfgroups}"
 
-# Lower perf restrictions if possible
-if [ -w /proc/sys/kernel/perf_event_paranoid ]; then
-  echo 1 | sudo tee /proc/sys/kernel/perf_event_paranoid >/dev/null || true
-fi
-
 # -------------------------- result workspace -----------------------------------
 TS="$(date '+%Y%m%d-%H%M%S')"
 OUT="$RESULT_ROOT/$TS"
