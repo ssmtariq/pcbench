@@ -158,6 +158,41 @@ G_CPI="$(pick_cpi_group)"
 
 log "Detected groups -> L1=${G_L1:-N/A}, L2=${G_L2:-N/A}, L3=${G_L3:-N/A}, MEM=$G_MEM, CPI=${G_CPI:-N/A}"
 
+# Wait for the measured phase to start (BenchBase logs this line)
+wait_for_measured_phase() {
+  while :; do
+    if grep -q 'MEASURE :: Warmup complete, starting measurements' "$LOG_BENCH" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+}
+
+# Get the current active tpcc backend (after restart) and re-pin it
+refresh_backend_and_pin() {
+  local newpid=""
+  for _ in $(seq 1 60); do
+    newpid="$(psql -tAc "SELECT pid
+                          FROM pg_stat_activity
+                          WHERE application_name='tpcc' AND state <> 'idle'
+                          ORDER BY backend_start DESC LIMIT 1;" 2>/dev/null | tr -d ' ')"
+    [ -n "$newpid" ] && break
+    sleep 1
+  done
+  [ -z "$newpid" ] && warn "Could not find active tpcc backend after restart"
+  PID="$newpid"
+  if [ -n "$PID" ]; then
+    if [ -n "${CORES}" ]; then
+      log "Re-pinning backend $PID to cores: $CORES"
+      sudo taskset -pc "$CORES" "$PID" >/dev/null || warn "taskset pin failed; continuing"
+    else
+      CURR_CORE="$(ps -o psr= -p "$PID" | awk '{print $1}')"
+      CORES="$CURR_CORE"
+      log "No CORES provided; measuring on current core: $CORES"
+    fi
+  fi
+}
+
 # -------------------------- step F: measure the app point ----------------------
 export LIKWID_PERF_PID="$PID"
 
