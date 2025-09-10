@@ -56,24 +56,32 @@ log "Results directory: $OUT"
 
 # -------------------------- helper: parse LIKWID output ------------------------
 # Sum a metric row across columns (or use the single value) from the Metrics table
-# ---- Robust parsers ----
-# Return cell (NF-1) from the line whose first column matches PAT (ignores units)
+# Scan the LIKWID Metrics table row whose LABEL (column 2) matches the regex,
+# then return the rightmost numeric-looking cell from that row.
 get_metric_cell() {
   local pat="$1" file="$2"
   awk -F '|' -v pat="$pat" '
-    $0 ~ pat {
-      for (i = NF; i >= 1; i--) {
-        v = $i
-        gsub(/[^0-9.+-eE]/, "", v)
-        if (v != "") { print v; exit }
+    {
+      label = $2
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", label)
+      if (label ~ pat) {
+        for (i = NF; i >= 1; i--) {
+          v = $i
+          gsub(/[^0-9.+-eE]/, "", v)
+          if (v != "") { print v; exit }
+        }
       }
-    }
-  ' "$file" 2>/dev/null
+    }' "$file" 2>/dev/null
 }
 
-# MEM bandwidth row in Metrics table (works for both "MByte/s" and "MBytes/s")
+# Prefer aggregate "Memory bandwidth", then fall back to "Memory read bandwidth"
 get_mem_bw_sum() {
-  get_metric_cell 'Memory([[:space:]]+read)?[[:space:]]+bandwidth[[:space:]]*\[(MByte|MBytes)/s\]' "$1"
+  local f="$1" v
+  v="$(get_metric_cell 'Memory[[:space:]]+bandwidth[[:space:]]*\\[(MByte|MBytes)/s\\]' "$f")"
+  if [ -z "$v" ]; then
+    v="$(get_metric_cell 'Memory[[:space:]]+read[[:space:]]+bandwidth[[:space:]]*\\[(MByte|MBytes)/s\\]' "$f")"
+  fi
+  [ -n "$v" ] && printf '%s\n' "$v"
 }
 
 # CPI and IPC metric (from TMA/CPI/CACHES groups)
@@ -89,8 +97,7 @@ get_runtime_s() {
         v = $i; gsub(/[^0-9.+-eE]/, "", v)
         if (v != "") { print v; exit }
       }
-    }
-  ' "$file" 2>/dev/null
+    }' "$file" 2>/dev/null
 }
 
 # Sum an event column by name in the Events table (handles BOTH spellings)
@@ -104,45 +111,25 @@ sum_event() {
 }
 
 get_instructions_sum() {
-  # Return the total retired instructions for the file $1.
-  # Strategy:
-  #   (1) Direct sum of *instructions retired* events (most reliable)
-  #   (2) Fallback: derive from cycles/CPI (preferred) or cycles*IPC
-  #
-  # NOTE: Requires sum_event, get_cpi, get_ipc helpers.
-
   local f="$1"
   local ins cycles cpi ipc
 
-  # 1) Direct events: handle many encodings and separators (._:)
-  #    - INST_RETIRED.ANY, INST_RETIRED.ANY_P, INSTR_RETIRED_ANY
-  #    - INSTRUCTIONS_RETIRED (seen in some groups)
+  # Direct instruction-retired events: INST/INSTR/INSTRUCTIONS + ANY/TOTAL, any of . _ :
   ins="$(sum_event '(INST(RUCTIONS)?|INSTR)([_.:]?)RETIRED([_.:]?)(ANY([_.:]?P)?|TOTAL)?' "$f")"
-  if [ -n "$ins" ]; then
-    echo "$ins"
-    return 0
-  fi
+  if [ -n "$ins" ]; then echo "$ins"; return 0; fi
 
-  # 2) Fallbacks from cycles + CPI/IPC
-  # cycles: match CORE or THREAD(_P) variants; allow colon/dot/underscore
   cycles="$(sum_event 'CPU([_.:]?)CLK\1UNHALTED([_.:]?)(CORE|THREAD([_.:]?P)?)?' "$f")"
-  # CPI/IPC taken from Metrics table
   cpi="$(get_cpi "$f")"
   ipc="$(get_ipc "$f")"
 
-  # Prefer cycles / CPI if CPI available and > 0
   if [ -n "$cycles" ] && [ -n "$cpi" ] && awk "BEGIN{exit(!($cpi>0))}"; then
     awk -v c="$cycles" -v p="$cpi" 'BEGIN{printf "%.0f\n", c/p}'
     return 0
   fi
-
-  # Next try cycles * IPC if IPC available and > 0
   if [ -n "$cycles" ] && [ -n "$ipc" ] && awk "BEGIN{exit(!($ipc>0))}"; then
     awk -v c="$cycles" -v i="$ipc" 'BEGIN{printf "%.0f\n", c*i}'
     return 0
   fi
-
-  # Nothing found/derivable
   return 1
 }
 
@@ -314,31 +301,26 @@ fi
 [ -s "$OUT/app/${G_CPI}.out" ] || warn "Missing LIKWID $G_CPI output: $OUT/app/${G_CPI}.out"
 
 # -------------------------- step G: compute intensity & summary ----------------
+# BW_MEM: try MEM, then CACHES fallback if empty
 BW_MEM="$(get_mem_bw_sum "$OUT/app/${G_MEM}.out" || true)"
-RT_S="$(get_runtime_s "$OUT/app/${G_CPI}.out")"
-[ -z "$RT_S" ] && RT_S="$APP_MEASURE_S"    # e.g., 45
+[ -z "$BW_MEM" ] && [ -n "$G_CACHES" ] && BW_MEM="$(get_mem_bw_sum "$OUT/app/${G_CACHES}.out" || true)"
 
-# Fallback: some perfgroups (or PID-filtered runs) miss MEM's rollup; CACHES has a "Memory bandwidth" metric too.
-if [ -z "$BW_MEM" ] && [ -n "$G_CACHES" ] && [ -s "$OUT/app/${G_CACHES}.out" ]; then
-  BW_MEM="$(get_mem_bw_sum "$OUT/app/${G_CACHES}.out" || true)"
-fi
+# Runtime (prefer CPI file), fallback to measured window if missing
+RT_S="$(get_runtime_s "$OUT/app/${G_CPI}.out" || true)"
+[ -z "$RT_S" ] && RT_S="$APP_MEASURE_S"
 
-# Cache-level bandwidths (best-effort; not all groups expose these)
-BW_L3="$( [ -n "$G_L3" ] && get_mem_bw_sum "$OUT/app/${G_L3}.out" || true )"
-BW_L2="$( [ -n "$G_L2" ] && get_mem_bw_sum "$OUT/app/${G_L2}.out" || true )"
-BW_L1="$( [ -n "$G_L1" ] && get_mem_bw_sum "$OUT/app/${G_L1}.out" || true )"
-
+# Instructions (prefer CPI file, then MEM, then CACHES)
 INSTR="$(get_instructions_sum "$OUT/app/${G_CPI}.out" || true)"
-RT_S="$(get_runtime_s "$OUT/app/${G_CPI}.out" || echo "$APP_MEASURE_S")"
+[ -z "$INSTR" ] && INSTR="$(get_instructions_sum "$OUT/app/${G_MEM}.out" || true)"
+[ -z "$INSTR" ] && [ -n "$G_CACHES" ] && INSTR="$(get_instructions_sum "$OUT/app/${G_CACHES}.out" || true)"
 
-if [[ -n "$INSTR" && -n "$RT_S" && -n "$BW_MEM" ]]; then
-  INSTR_PER_S=$(awk -v i="$INSTR" -v t="$RT_S" 'BEGIN{ if(t>0) printf "%.3f", i/t; else print "" }')
-  BYTES_PER_S=$(awk -v m="$BW_MEM" 'BEGIN{ printf "%.3f", m*1024*1024 }')   # MBytes/s -> Bytes/s
-  INSTR_PER_BYTE=$(awk -v ips="$INSTR_PER_S" -v bps="$BYTES_PER_S" 'BEGIN{ if(bps>0) printf "%.9f", ips/bps; else print "" }')
+# Compute intensity
+if [ -n "$INSTR" ] && [ -n "$RT_S" ] && [ -n "$BW_MEM" ]; then
+  INSTR_PER_S=$(awk -v i="$INSTR" -v t="$RT_S" 'BEGIN{ if(t>0) printf "%.6f", i/t }')
+  BYTES_PER_S=$(awk -v m="$BW_MEM" 'BEGIN{ printf "%.6f", m*1024*1024 }')
+  INSTR_PER_BYTE=$(awk -v ips="$INSTR_PER_S" -v bps="$BYTES_PER_S" 'BEGIN{ if(bps>0) printf "%.9f", ips/bps }')
 else
-  warn "Could not compute intensity (missing CPI or MEM numbers)"
-  INSTR_PER_S=""
-  INSTR_PER_BYTE=""
+  warn "Could not compute intensity — missing: ${INSTR:+}${INSTR:-INSTR} ${RT_S:+}${RT_S:-RT_S} ${BW_MEM:+}${BW_MEM:-BW_MEM}"
 fi
 
 # Try to pull ‘roof’ peaks (last numbers in each output). We don’t force-parse—keep raw too.
