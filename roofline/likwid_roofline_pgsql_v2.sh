@@ -104,10 +104,17 @@ get_runtime_s() {
 sum_event() {
   local name_re="$1" file="$2"
   awk -F '|' -v pat="$name_re" '
-    $0 ~ /\|/ && $2 ~ pat {
-      v=$NF; gsub(/[^0-9]/,"",v); if (v!="") sum+=v
+    $0 ~ pat {
+      # take rightmost numeric-looking field on the line
+      v = ""
+      for (i = NF; i >= 1; i--) {
+        t=$i; gsub(/[^0-9.+-eE]/,"",t)
+        if (t!="") { v = t; break }
+      }
+      if (v!="") sum += v + 0
     }
-    END { if (sum>0) printf "%.0f\n", sum }' "$file" 2>/dev/null
+    END { if (sum>0) printf "%.0f\n", sum }
+  ' "$file" 2>/dev/null
 }
 
 get_instructions_sum() {
@@ -357,8 +364,6 @@ CSV="$OUT/roofline_summary.csv"
   [ -n "$BW_L1" ] && echo "app_l1_bandwidth,$BW_L1,MBytes/s,LIKWID $G_L1 SUM"
   [ -n "$INSTR" ] && echo "app_instructions,$INSTR,count,LIKWID $G_CPI (INSTR_RETIRED_ANY)"
   [ -n "$RT_S" ] && echo "app_runtime,$RT_S,s,From $G_CPI Runtime RDTSC"
-  [ -n "$INSTR_PER_S" ] && echo "app_instr_per_sec,$INSTR_PER_S,1/s,Derived"
-  [ -n "$INSTR_PER_BYTE" ] && echo "app_instr_per_byte,$INSTR_PER_BYTE,1/byte,Instruction Roofline intensity"
   [ -n "$INSTR_PER_S" ] && echo "app_instr_per_sec,$INSTR_PER_S,1/s,Derived"
   [ -n "$INSTR_PER_BYTE" ] && echo "app_instr_per_byte,$INSTR_PER_BYTE,1/byte,Instruction Roofline intensity"
   [ -n "$ROOF_L1" ] && echo "roof_L1,$ROOF_L1,MBytes/s,likwid-bench load_avx ${SZS[L1]} ${THREADS}t"
