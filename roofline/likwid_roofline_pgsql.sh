@@ -194,6 +194,10 @@ refresh_backend_and_pin() {
 }
 
 # -------------------------- step F: measure the app point ----------------------
+# Wait until BenchBase says the measured phase started, then reacquire + repin backend
+wait_for_measured_phase
+refresh_backend_and_pin
+
 export LIKWID_PERF_PID="$PID"
 
 measure_group() {
