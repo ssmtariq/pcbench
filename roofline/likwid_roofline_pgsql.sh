@@ -166,10 +166,10 @@ measure_group() {
   [ -z "$G" ] && return 0
   log "Measuring group $G for ${APP_MEASURE_S}s on cores $CORES (backend pinned)"
   if [ "$(id -u)" -ne 0 ]; then
-    sudo -E likwid-perfctr -C "$CORES" -g "$G" -- sleep "$APP_MEASURE_S" \
+    sudo -E likwid-perfctr -f -C "$CORES" -g "$G" -- sleep "$APP_MEASURE_S" \
       | tee "$PF" >/dev/null || warn "Group $G failed"
   else
-    likwid-perfctr -C "$CORES" -g "$G" -- sleep "$APP_MEASURE_S" \
+    likwid-perfctr -f -C "$CORES" -g "$G" -- sleep "$APP_MEASURE_S" \
       | tee "$PF" >/dev/null || warn "Group $G failed"
   fi
 }
