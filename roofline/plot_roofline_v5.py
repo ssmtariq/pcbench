@@ -31,6 +31,44 @@ def line_angle_deg(ax, x0, y0, x1, y1):
     (X1, Y1) = ax.transData.transform((x1, y1))
     return np.degrees(np.arctan2(Y1 - Y0, X1 - X0))
 
+def annotate_app_point(ax, app_x, app_y, gy_func):
+    """
+    Plot the application point (PostgreSQL tpcc) and annotate with (x,y) values.
+    If the point is very close to the x-axis, put label above; otherwise below.
+    """
+    x_val = app_x
+    y_val = gy_func(app_y)
+
+    # plot the grey dot
+    ax.loglog([x_val], [y_val],
+              marker='o', markersize=8, linestyle='None',
+              label="PostgreSQL (tpcc)", color='#6b6b6b')
+
+    # decide label placement relative to x-axis
+    ymin, ymax = ax.get_ylim()
+    decades_above = math.log10(max(y_val, ymin*1.0000001) / ymin)
+
+    THRESH = 0.6  # ~0.6 decade (~4x above ymin)
+    if decades_above < THRESH:
+        offset = (0, 10)   # above
+        va = 'bottom'
+    else:
+        offset = (0, -12)  # below
+        va = 'top'
+
+    # value pair label
+    label_txt = f"({x_val:.3g}, {y_val:.3g})"
+    ax.annotate(
+        label_txt,
+        xy=(x_val, y_val),
+        xycoords='data',
+        textcoords='offset points',
+        xytext=offset,
+        ha='center', va=va,
+        fontsize=9, color='#4d4d4d',
+        bbox=dict(facecolor='white', alpha=0.5, edgecolor='none', pad=2.5),
+    )
+
 # ---------- main plot ----------
 def plot_roofline(csv_path, title=None, savepath=None):
     d = read_summary(csv_path)
@@ -177,9 +215,8 @@ def plot_roofline(csv_path, title=None, savepath=None):
                     fontsize=10, color='#9467bd', ha='left', va='bottom',
                     bbox=dict(facecolor='white', alpha=0.35, edgecolor='none', pad=1.0))
 
-    # App point
-    ax.loglog([app_x], [gy(app_y)], marker='o', markersize=8,
-              linestyle='None', label="PostgreSQL (tpcc)", color='#6b6b6b')
+    # App point with annotation
+    annotate_app_point(ax, app_x, app_y, gy)
 
     # Axes & title
     ax.set_xlabel("Operational intensity (Instructions / Byte)")
