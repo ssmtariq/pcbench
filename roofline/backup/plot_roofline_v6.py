@@ -124,11 +124,11 @@ def plot_roofline(csv_path, title=None, savepath=None):
         ax.axvspan(knee_left, knee_right, facecolor='#aaaaaa', alpha=0.06, lw=0)
         ax.axvspan(knee_right, x_max,  facecolor='#1f77b4', alpha=0.06, lw=0)
         trans = ax.get_xaxis_transform()
-        ax.text((x_min*knee_left)**0.5,   0.03, "Memory bound?", transform=trans,
+        ax.text((x_min*knee_left)**0.5,   0.03, "Memory bound", transform=trans,
                 ha='center', va='bottom', fontsize=10, color='#8c564b')
-        ax.text((knee_left*knee_right)**0.5, 0.03, "Bound by compute\nand memory roofs?",
+        ax.text((knee_left*knee_right)**0.5, 0.03, "Bound by compute\nand memory roofs",
                 transform=trans, ha='center', va='bottom', fontsize=10, color='#4d4d4d')
-        ax.text((knee_right*x_max)**0.5,  0.03, "Compute bound?", transform=trans,
+        ax.text((knee_right*x_max)**0.5,  0.03, "Compute bound", transform=trans,
                 ha='center', va='bottom', fontsize=10, color='#1f77b4')
 
     # ---- stable rotation for memory labels (slope 1 on log-log axes) ----
