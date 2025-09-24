@@ -47,6 +47,7 @@ nginx
 #If port binding fails at 80 then update the nginx.conf file "listen" to unprevileged port e.g. 8080
 code ~/nginx/conf/nginx.conf
 nginx -s stop
+# Copy the configs from pcbench/nginx/configs/* to ~/nginx/conf/
 ```
 
 At this point `nginx -V` should report version 1.27.0 with the
