@@ -40,7 +40,7 @@ BENCH_SCRIPT="${BENCH_SCRIPT:-$HOME/pcbench/postgresql/pgsql_bench.sh}"
 
 # Path to parser helper (can override via PARSER_LIB)
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PARSER_LIB="${PARSER_LIB:-${SCRIPT_DIR}/parser.sh}"
+PARSER_LIB="${PARSER_LIB:-${SCRIPT_DIR}/parser_mb.sh}"
 [ -r "$PARSER_LIB" ] || fatal "Parser helper not found: $PARSER_LIB"
 # shellcheck source=/dev/null
 source "$PARSER_LIB"
@@ -293,9 +293,134 @@ sut_refresh_backend_and_pin() {
   refresh_backend_and_pin
 }
 
+print_if_multiple_backends() {
+  local n_clients n_workers
+  n_clients="$(psql -X -Aqt -P pager=off -c "
+    SELECT count(*)
+    FROM pg_stat_activity
+    WHERE backend_type='client backend'
+      AND application_name='tpcc'
+      AND state='active';
+  " 2>/dev/null || echo 0)"
+
+  n_workers="$(psql -X -Aqt -P pager=off -c "
+    SELECT count(*)
+    FROM pg_stat_activity
+    WHERE backend_type='parallel worker'
+      AND leader_pid IN (
+        SELECT pid FROM pg_stat_activity
+        WHERE backend_type='client backend'
+          AND application_name='tpcc'
+      );
+  " 2>/dev/null || echo 0)"
+
+  local total=$(( ${n_clients:-0} + ${n_workers:-0} ))
+
+  if [ "$total" -gt 1 ]; then
+    echo "🔎 Multiple Postgres backends detected: ${total} (clients=${n_clients:-0}, parallel_workers=${n_workers:-0})"
+    PAGER=cat psql -X -Aqt -P pager=off -c "
+      SELECT pid, backend_type, state, COALESCE(wait_event,'') AS wait_event,
+            COALESCE(leader_pid,0) AS leader, backend_start
+      FROM pg_stat_activity
+      WHERE (backend_type='client backend' AND application_name='tpcc')
+        OR backend_type='parallel worker'
+      ORDER BY backend_start DESC;
+    " 2>/dev/null | head -n 50
+  else
+    echo "✅ Single active backend."
+  fi
+}
+
+collect_tpcc_backend_pids() {
+  psql -X -Aqt -P pager=off -c "
+    SELECT pid
+    FROM pg_stat_activity
+    WHERE backend_type='client backend'
+      AND application_name='tpcc'
+      AND state='active'
+    UNION ALL
+    SELECT pid
+    FROM pg_stat_activity
+    WHERE backend_type='parallel worker'
+      AND leader_pid IN (
+        SELECT pid FROM pg_stat_activity
+        WHERE backend_type='client backend'
+          AND application_name='tpcc'
+      );
+  " 2>/dev/null | awk '{gsub(/^[[:space:]]+|[[:space:]]+$/,""); if(length) print}'
+}
+
+cores_from_pids() {
+  awk '
+    {
+      cmd="ps -o psr= -p "$0" 2>/dev/null";
+      cmd | getline c; close(cmd);
+      gsub(/^[[:space:]]+|[[:space:]]+$/,"",c);
+      if (c ~ /^[0-9]+$/) seen[c]=1
+    }
+    END {
+      first=1;
+      for (c in seen) {
+        if (!first) printf(",");
+        printf("%s", c);
+        first=0
+      }
+    }'
+}
+
 sut_measure_groups() {
   # -------------------------- step F: measure app point --------------------------
-  export LIKWID_PERF_PID="$PID"
+  # export LIKWID_PERF_PID="$PID"
+  [ "${PRINT_BACKEND_SUMMARY:-1}" = "1" ] && print_if_multiple_backends
+  if [ "${MULTI_BACKENDS:-0}" = "1" ]; then unset LIKWID_PERF_PID; else export LIKWID_PERF_PID="$PID"; fi
+
+  # When aggregating, auto-derive a core set that covers all active backends if CORES is empty.
+  if [ "${MULTI_BACKENDS:-0}" = "1" ]; then
+    log "MULTI_BACKENDS=1 → system-level measurement (LIKWID_PERF_PID=${LIKWID_PERF_PID:-<unset>})"
+    mapfile -t __ALL_PIDS < <(collect_tpcc_backend_pids)
+    log "collect_tpcc_backend_pids → ${#__ALL_PIDS[@]} PIDs"
+    if [ "${#__ALL_PIDS[@]}" -gt 0 ]; then
+      printf "%s\n" "${__ALL_PIDS[@]}" > "$OUT/app/pids.txt"
+      {
+        echo "# pid  psr  cmdline"
+        for p in "${__ALL_PIDS[@]}"; do
+          psr="$(ps -o psr= -p "$p" 2>/dev/null | tr -d ' ')"
+          cmd="$(tr '\0' ' ' < /proc/"$p"/cmdline 2>/dev/null | sed 's/[[:space:]]\+/ /g')"
+          printf "%s  %s  %s\n" "$p" "${psr:-?}" "${cmd:-?}"
+        done
+      } > "$OUT/app/pids_annotated.txt" 2>/dev/null || true
+
+      # Always compute the union-of-cores we would aggregate on
+      DERIVED_CORES="$(printf "%s\n" "${__ALL_PIDS[@]}" | cores_from_pids)"
+      log "Derived core set from PIDs: ${DERIVED_CORES:-<empty>}"
+
+      # Decide whether to replace CORES:
+      # - If CORES is empty → use DERIVED_CORES
+      # - If multiple backends and CORES looks like a single CPU equal to current $PID CPU → upgrade to DERIVED_CORES
+      if [ -z "${CORES}" ]; then
+        CORES="$DERIVED_CORES"
+        log "CORES was empty → using derived cores: $CORES"
+      else
+        pid_cpu="$(ps -o psr= -p "$PID" 2>/dev/null | tr -d ' ')"
+        if [ "${#__ALL_PIDS[@]}" -gt 1 ] && [ -n "$DERIVED_CORES" ] && [[ "$CORES" =~ ^[0-9]+$ ]] && [ "$CORES" = "$pid_cpu" ]; then
+          log "CORES currently single CPU ($CORES) from one backend; overriding with derived union."
+          CORES="$DERIVED_CORES"
+        else
+          log "Keeping existing CORES as-is: $CORES"
+        fi
+      fi
+
+      echo "$CORES" > "$OUT/app/cores.txt"
+      if [ -z "$CORES" ]; then
+        warn "Derived core set is empty; will fall back to current core of PID=$PID"
+        CORES="$(ps -o psr= -p "$PID" | awk '{print $1}')"
+      fi
+      log "Aggregating on cores: $CORES"
+    else
+      warn "collect_tpcc_backend_pids returned 0 PIDs; will continue with PID=$PID on cores=$CORES"
+    fi
+  fi
+
 
   measure_group() {
     local G="$1"; local PF="$OUT/app/${G}.out"
